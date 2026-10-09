@@ -1,0 +1,14 @@
+.ld { min-height: 100vh; background: #0d1117; color: #eef1f4; font-family: var(--font-sans); padding: 0 6vw 40px; display: flex; flex-direction: column; }
+.ld-top { display: flex; justify-content: space-between; padding: 22px 0; font-size: .68rem; letter-spacing: .22em; color: #9aa6b2; } .ld-top span:first-child { color: #eef1f4; font-weight: 700; }
+.ld-hero { padding: 12vh 0 8vh; max-width: 860px; } .ld-eyebrow { font-size: .68rem; letter-spacing: .24em; color: #f2a65a; }
+.ld h1 { font: 600 clamp(2.6rem, 7vw, 5.4rem)/1.02 var(--font-display); margin: 18px 0; }
+.ld-lede { font: 1.15rem/1.6 var(--font-body); color: #b8c2cc; max-width: 600px; }
+.ld-actions { display: flex; gap: 14px; margin-top: 34px; flex-wrap: wrap; }
+.ld-cta { padding: 14px 24px; background: #f2a65a; color: #0d1117; font-size: .76rem; font-weight: 700; letter-spacing: .16em; text-decoration: none; border: 1px solid #f2a65a; }
+.ld-cta--ghost { background: transparent; color: #eef1f4; border-color: rgba(255,255,255,.3); } .ld-cta:hover { filter: brightness(1.1); } .ld-cta:focus-visible { outline: 2px solid #9fe3f0; outline-offset: 3px; }
+.ld-phen { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); border-top: 1px solid rgba(255,255,255,.14); }
+.ld-phen article { padding: 26px 22px 30px 0; border-right: 1px solid rgba(255,255,255,.1); } .ld-phen article:last-child { border-right: 0; }
+.ld-phen h2 { font: 600 1.6rem var(--font-display); } .ld-phen p { color: #9aa6b2; margin: 4px 0 14px; font-size: .9rem; }
+.ld-phen span { font-size: .66rem; letter-spacing: .16em; color: #6c7783; text-transform: uppercase; } .ld-phen a { color: #f2a65a; font-size: .8rem; text-decoration: none; } .ld-phen .is-live h2 { color: #f2a65a; }
+.ld-path { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-top: 40px; padding-top: 22px; border-top: 1px solid rgba(255,255,255,.14); font-size: .66rem; letter-spacing: .2em; color: #9aa6b2; } .ld-path i { font-style: normal; color: #f2a65a; }
+.ld-foot { margin-top: auto; padding-top: 50px; font-size: .74rem; color: #6c7783; max-width: 620px; }

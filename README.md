@@ -158,16 +158,21 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-## Map-first experience (October 2026 redesign)
+## Scientific Field Atlas (UI/UX redesign)
 
-`/wetland` is now a map-first "Wetland Time Machine": ▶ PLAY CHANGE, a real-date timeline (gaps are labelled, never interpolated), four map modes (Motion / Radar / Detection / Explain), **Why this region?** investigation with an Evidence Stack (what evidence exists, not a confidence score), **Challenge this detection**, **SAR Detective**, **Does the signal survive?** (detection sensitivity), **Lock comparison** (draggable split between two real dates), **What happened?** (change story generated only from loaded values), the NASA data chain and a "Why radar?" explainer. The previous dashboard remains at `/wetland/classic`; every API route and pipeline stage is unchanged.
+Design tokens live in `src/styles/atlas.css` (dark map workspace + warm editorial surfaces; semantic data colours: observed cyan, derived orange, supporting green, unassessed grey, warning amber). Fonts are self-hosted in `public/fonts/` (Inter, JetBrains Mono, Playfair Display; SIL OFL), so nothing is fetched from a font service at runtime.
 
-Three data tiers are never blended and always labelled:
+- `/` landing, `/wetland` the Time Machine (masthead, left context rail, map, icon tool dock, one consistent investigation drawer, real-date timeline), `/wetland/global` the Earth Change Atlas (A browse worldwide observations, B open processed cases, C advanced: process another place), `/wetland/classic` the earlier dashboard.
+- Three data tiers are never blended: **Real NISAR showcase** (`public/showcase/featured/`), **Local NISAR run** (`/wetland?source=raster`), **Interactive sandbox** (fictional, deterministic).
+- Evidence wording follows the pipeline's definitions: "temporal" = share of the region also flagged on the previous date; "compact footprint" = region fills at least half its bounding box; threshold stability = share of pixels lost when the cutoff rises 1 dB. Nothing is scored as a probability.
+- The independent optical check for the current case is **inconclusive** (shared clear area far below the 20% needed); raw scores are tucked behind a disclosure and never emphasised.
 
-| Tier | Where it comes from |
-| --- | --- |
-| REAL NISAR SHOWCASE | `public/showcase/featured/` exported from a saved real run (`pipeline/export_showcase.py`). Deploy-safe. |
-| LOCAL NISAR RUN | `/wetland?source=raster` reads `pipeline/output/` (needs your local run). |
-| INTERACTIVE SANDBOX | Deterministic browser simulation. Fictional. |
+### Tests
 
-Static showcase builds have no per-pixel raster, so SAR Detective returns the region-average of the candidate polygon under the cursor and says so; a local run still samples a raster cell. Detection sensitivity in showcase/local tiers shows the stored sweep and does not recompute the map; only the sandbox recomputes (labelled "simulated interaction"). `src/phenomena/registry.ts` declares wetlands (available) plus forests and volcanoes (planned, no fake functionality).
+```bash
+npm run lint && npm run build && npm test                  # unit tests (evidence language)
+python -m unittest pipeline.test_legacy_showcase           # showcase exporter + legacy adapter
+npx next start -p 3140 &                                   # then, with Python Playwright installed:
+python tests/e2e/wetland_smoke.py http://localhost:3140    # Time Machine, radar, every tool, responsive
+python tests/e2e/explore_smoke.py http://localhost:3140    # landing + Explore page
+```

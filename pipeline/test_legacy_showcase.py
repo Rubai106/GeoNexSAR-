@@ -1,5 +1,14 @@
-"""Tests for the legacy-run showcase adapter. Standard library only.
-Synthetic fixtures below exist ONLY inside temporary directories for testing; they are never published."""
+"""Tests for the legacy-run showcase adapter and the modern exporter. Standard library only.
+
+These tests are self-contained: they build every input in a temporary directory, so they pass on a clean
+checkout with no `pipeline/output/`. The synthetic manifests exist ONLY inside temporary directories for
+testing and are never published. The only repository file used is the committed boundary
+`pipeline/data/tanguar_haor_adb_boundary.geojson`, because the adapter verifies boundaries against it.
+
+`RealLocalLegacyOutput` additionally exercises a genuine legacy run if one happens to be present locally
+and is skipped otherwise.
+"""
+import copy
 import json
 import shutil
 import subprocess
@@ -13,8 +22,9 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 import legacy_showcase as legacy  # noqa: E402
 
-RUN_ID = "3b01cdb5674a44ea9c6c3d17ec8c07b8"
-LOOSE = HERE / "output"
+BOUNDARY_FILE = HERE / "data" / "tanguar_haor_adb_boundary.geojson"
+RUN_ID = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+OBS_DATES = ["2026-06-30", "2026-07-12", "2026-07-24", "2026-08-17", "2026-08-29", "2026-09-10", "2026-09-22"]
 
 
 def write_json(path, value):
@@ -24,18 +34,58 @@ def write_json(path, value):
     return len(text)
 
 
-@unittest.skipUnless((LOOSE / "last_attempt.json").is_file(), "legacy last_attempt.json not present")
+def scene(date, number):
+    stamp = date.replace("-", "")
+    return f"NISAR_L2_PR_GCOV_{number:03d}_069_A_014_4005_DHDH_A_{stamp}T232134_{stamp}T232209_P05023_N_F_J_001"
+
+
+def boundary_facts():
+    """Source string and bounds of the committed boundary file, so the fixture manifest can be verified against it."""
+    collection = json.loads(BOUNDARY_FILE.read_text(encoding="utf-8"))
+    props = collection["features"][0]["properties"]
+    return props["boundary_source"], legacy.bbox_of(collection)
+
+
+def make_manifest():
+    source, bounds = boundary_facts()
+    return {
+        "run_id": RUN_ID, "mode": "real", "data_source": "NISAR", "status": "COMPLETE", "seed": None,
+        "product": legacy.EXPECTED_PRODUCT, "product_maturity": "PROVISIONAL", "frequency": "L-band",
+        "site_name": "Tanguar Haor mapped boundary", "site_bounds": bounds, "wetland_boundary_source": source,
+        "selected_date": "2026-08-29", "observation_count": 7,
+        "baseline_date": "2026-06-18", "baseline_scene": scene("2026-06-18", 23), "baseline_method": "PER_PIXEL_MEDIAN",
+        "baseline_observation_dates": ["2026-06-18", "2026-06-30"],
+        "observation_scenes": [scene(d, 24 + i) for i, d in enumerate(OBS_DATES)],
+        "reference_validated": False, "cross_sensor_check_completed": True, "reference_check_status": "INCONCLUSIVE",
+        "quality_mask_method": "fixture", "completed_at": "2026-10-05T00:00:00+00:00",
+    }
+
+
+def make_demo_style_loose_files(run: Path):
+    """Loose derived files that do NOT belong to the manifest above: wrong site, wrong dates, wrong place."""
+    props = {"id": "demo_1", "date": "2026-07-24", "area_km2": 1.0, "classification": "OPEN_WATER", "quality_status": "PASS",
+             "spatial_status": "PASS", "temporal_status": "PASS", "threshold_stability": "STABLE", "evidence_state": "SUPPORTED",
+             "mean_delta_db": -3.0, "valid_fraction": 0.9, "centroid": [24.65, 91.55]}
+    ring = [[91.52, 24.64], [91.58, 24.64], [91.58, 24.67], [91.52, 24.64]]
+    write_json(run / "patches_final.geojson", {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [ring]}, "properties": props}]})
+    dates = ["2026-06-18", "2026-06-30", "2026-07-12", "2026-07-24", "2026-08-05", "2026-08-17", "2026-08-29", "2026-09-10"]
+    write_json(run / "wetland_pulse.json", {"site": "Hakaluki Haor", "peak": {"date": "2026-07-24", "area_km2": 1.0},
+               "dates": [{"date": d, "area_km2": 1.0, "fraction": 0.1, "mean_delta_db": 1.0, "patches": 1} for d in dates]})
+    write_json(run / "sensitivity_results.json", {"thresholds": [{"delta_db": 2.0, "area_km2": 1.0, "patches": 1}], "stability_verdict": "STABLE", "stable_range": [1, 3], "sensitivity_note": "fixture"})
+    (run / "before_hh.tif").write_bytes(b"not a real raster")  # must never be published
+
+
+@unittest.skipUnless(BOUNDARY_FILE.is_file(), "committed Tanguar boundary file not present")
 class LegacyShowcase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.run = self.tmp / "runs" / RUN_ID
         self.run.mkdir(parents=True)
-        for item in LOOSE.iterdir():
-            if item.is_file():
-                shutil.copy(item, self.run / item.name)
+        self.manifest = make_manifest()
+        write_json(self.run / "last_attempt.json", self.manifest)
+        make_demo_style_loose_files(self.run)
         self.out = self.tmp / "out"
         self.out.mkdir()
-        self.manifest = json.loads((self.run / "last_attempt.json").read_text())
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -47,7 +97,7 @@ class LegacyShowcase(unittest.TestCase):
         self.assertTrue(legacy.is_legacy_run(self.run))
 
     def test_inconsistent_loose_files_are_not_exported_as_real(self):
-        """The loose pulse/patch files in the repo are demo files (wrong site, wrong dates, wrong location)."""
+        """Loose pulse/patch files with the wrong site, dates and location must be skipped, not published."""
         summary = self.export()
         self.assertEqual(summary["completeness"], "METADATA_ONLY")
         self.assertFalse((self.out / "pulse.json").exists())
@@ -88,6 +138,16 @@ class LegacyShowcase(unittest.TestCase):
             with self.assertRaises(legacy.LegacyRunError, msg=key):
                 legacy.validate_manifest(broken, RUN_ID)
 
+    def test_boundary_is_withheld_when_it_does_not_match_the_manifest(self):
+        broken = copy.deepcopy(self.manifest)
+        broken["wetland_boundary_source"] = "some other source"
+        write_json(self.run / "last_attempt.json", broken)
+        manifest = json.loads((self.run / "last_attempt.json").read_text())
+        self.assertIsNone(legacy.find_boundary(ROOT, manifest)[0])
+        summary = self.export()
+        self.assertFalse((self.out / "boundary.geojson").exists())
+        self.assertIn("boundary.geojson", [item["artifact"] for item in summary["skipped"]])
+
     def test_consistent_derived_files_are_exported_for_the_selected_date_only(self):
         """Synthetic, self-consistent derived files (test fixture only)."""
         dates = legacy.validate_manifest(self.manifest, RUN_ID)["observation_dates"]
@@ -111,10 +171,47 @@ class LegacyShowcase(unittest.TestCase):
         self.assertTrue((self.out / "pulse.json").exists())
 
 
+REAL_LOCAL = HERE / "output" / "last_attempt.json"
+
+
+@unittest.skipUnless(REAL_LOCAL.is_file(), "no local legacy run in pipeline/output (expected on a clean checkout)")
+class RealLocalLegacyOutput(unittest.TestCase):
+    """Identity and safety checks against a genuine local legacy run, when one exists. Completeness is not asserted,
+    because it legitimately depends on whether that run's loose derived files verify."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.manifest = json.loads(REAL_LOCAL.read_text())
+        self.run_id = self.manifest["run_id"]
+        self.run = self.tmp / "runs" / self.run_id
+        self.run.mkdir(parents=True)
+        for item in (HERE / "output").iterdir():
+            if item.is_file():
+                shutil.copy(item, self.run / item.name)
+        self.out = self.tmp / "out"
+        self.out.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_exports_without_rasters_or_local_paths(self):
+        if legacy.is_legacy_run(self.run):
+            legacy.export_legacy(self.run, self.out, self.run_id, ROOT, write_json)
+            self.assertNotIn(".tif", [p.suffix.lower() for p in self.out.rglob("*") if p.is_file()])
+            self.assertNotIn(str(self.tmp), " ".join(p.read_text() for p in self.out.rglob("*.json")))
+
+    def test_real_manifest_identity_is_enforced(self):
+        broken = dict(self.manifest, run_id="f" * 32)
+        with self.assertRaises(legacy.LegacyRunError):
+            legacy.validate_manifest(broken, self.run_id)
+
+
 class ModernExporterUnchanged(unittest.TestCase):
     def test_modern_run_still_exports(self):
         rid = "c" * 32
-        run = HERE / "output" / "runs" / rid
+        output_dir = HERE / "output"
+        output_existed = output_dir.exists()
+        run = output_dir / "runs" / rid
         case = "selftest-modern"
         out = ROOT / "public" / "showcase" / case
         try:
@@ -133,9 +230,11 @@ class ModernExporterUnchanged(unittest.TestCase):
         finally:
             shutil.rmtree(out, ignore_errors=True)
             shutil.rmtree(run, ignore_errors=True)
-            runs = HERE / "output" / "runs"
+            runs = output_dir / "runs"
             if runs.exists() and not any(runs.iterdir()):
                 runs.rmdir()
+            if not output_existed and output_dir.exists() and not any(output_dir.iterdir()):
+                output_dir.rmdir()  # leave a clean checkout clean
 
 
 if __name__ == "__main__":

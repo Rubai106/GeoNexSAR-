@@ -11,6 +11,8 @@ import RadarComparison from "./RadarComparison";
 import ReferenceEvidence from "./ReferenceEvidence";
 import SavedDateCheck from "./SavedDateCheck";
 import MozambiqueFloodCase from "./MozambiqueFloodCase";
+import { loadShowcaseBundle, loadShowcasePatches, type ShowcaseBundle } from "@/lib/showcase";
+import "./atlas-global.css";
 import type { BoundaryCollection, CoverageCollection, DetectionCollection } from "./GlobalNisarDetectionMap";
 
 const GlobalNisarDetectionMap = dynamic(() => import("./GlobalNisarDetectionMap"), {
@@ -169,6 +171,22 @@ export default function GlobalDetectionsExplorer() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  // The packaged real case needs no local server, Python or Earthdata login, so the page works on a static deployment.
+  const [showcase, setShowcase] = useState<ShowcaseBundle | null>(null);
+  const [showcaseDetections, setShowcaseDetections] = useState<DetectionCollection | null>(null);
+  useEffect(() => {
+    let live = true;
+    void loadShowcaseBundle().then(async (bundle) => {
+      if (!live || !bundle) return;
+      setShowcase(bundle);
+      if (bundle.pulse) {
+        const peak = bundle.pulse.peak.date; const patches = await loadShowcasePatches(bundle, peak).catch(() => []);
+        if (live) setShowcaseDetections({ type: "FeatureCollection", features: patches.map((p) => ({ type: "Feature" as const, geometry: p.geometry as never,
+          properties: { id: p.id, classification: p.classification, area_km2: p.area_km2, date: p.date } })) });
+      }
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, []);
 
   const loadFinishedRun = useCallback((runId: string) => {
     setSelectedRun(runId); setCandidateDate(""); setError(""); setLoading(true);
@@ -284,42 +302,72 @@ export default function GlobalDetectionsExplorer() {
   const coverage: CoverageCollection = { type: "FeatureCollection", features: coverageData?.features ?? [] };
   const isNisar = data?.data_source === "NISAR";
   const today = new Date().toISOString().slice(0, 10);
+  const usingShowcase = !isNisar && !!showcase?.pulse;
+  const featured = showcase?.pulse ? {
+    name: (showcase.manifest.site_display_name ?? showcase.manifest.site_name).replace(/\s*·.*$/, "").replace(/\s+mapped boundary$/i, ""),
+    date: showcase.pulse.peak.date, area: showcase.pulse.peak.area_km2, regions: showcase.pulse.dates.find((d) => d.date === showcase.pulse!.peak.date)?.patches ?? 0,
+    dates: showcase.manifest.observation_dates, status: showcase.manifest.reference_check_status ?? "NOT_RUN",
+    coverage: (showcase.reference.evidence?.coverage as { common_clear_fraction?: number } | undefined)?.common_clear_fraction } : null;
+  const locateFeatured = () => {
+    const b = showcase?.manifest.site_bounds; if (!b) return;
+    setCoordinateTarget({ latitude: (b[1] + b[3]) / 2, longitude: (b[0] + b[2]) / 2 }); setFocusStudyArea(false);
+    document.getElementById("global-nisar-map")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  };
   const statusText = loading ? "Loading pipeline output…"
-    : error ? "NISAR output unavailable"
+    : error ? (showcase ? "Local run not loaded · real showcase available" : "No local run loaded")
       : isNisar ? "NISAR · provisional candidates"
         : data?.data_source === "SIMULATED_DEMO" ? "No real NISAR run loaded" : "NISAR run required";
-  const statusClass = loading ? "global-source-pill--loading" : error ? "global-source-pill--error"
+  const statusClass = loading ? "global-source-pill--loading" : error ? "global-source-pill--snapshot"
     : isNisar ? "global-source-pill--live" : "global-source-pill--snapshot";
 
   return (
     <main className="global-coverage-page detection-page">
       <header className="global-header">
         <div className="global-brand">
-          <span className="global-brand__mark" aria-hidden="true">B</span>
-          <div><strong>BEYONDERS</strong><span>WETLAND PULSE</span></div>
+          <Link href="/" className="atlas-wordmark" aria-label="Beyonders home">Beyonders</Link>
           <span className="global-header__divider" aria-hidden="true" />
-          <span className="global-header__section">Worldwide NISAR observations</span>
+          <span className="global-header__section">Earth Change Atlas</span>
         </div>
-        <div className="detection-header-actions">
-          <Link className="global-back-link" href="/wetland/global/scenes">Global NISAR scenes <span aria-hidden="true">↗</span></Link>
-          <Link className="global-back-link" href="/wetland">Wetland story: Hakaluki Haor <span aria-hidden="true">↗</span></Link>
-          <Link className="global-back-link" href="/wetland?source=raster">Latest run analysis <span aria-hidden="true">↗</span></Link>
-          <Link className="global-back-link" href="/">Earth Change: wetlands · forests · volcanoes <span aria-hidden="true">↗</span></Link>
-        </div>
+        <nav className="detection-header-actions" aria-label="Beyonders">
+          {featured && <Link className="global-back-link" href="/wetland">Processed case: {featured.name}</Link>}
+          <Link className="global-back-link" href="/wetland/global/scenes">Search NISAR scenes</Link>
+          <Link className="global-back-link" href="/">Home</Link>
+        </nav>
       </header>
 
       <section className="global-intro detection-intro" aria-labelledby="global-detections-title">
         <div>
-          <p className="global-eyebrow">SAR-FIRST · NASA NISAR L2 GCOV</p>
+          <p className="atlas-micro">Earth Change Atlas</p>
           <h1 id="global-detections-title">Explore NISAR across the world</h1>
-          <p className="global-description">Browse NASA’s worldwide NISAR GCOV backscatter mosaic. Experimental radar-change candidates appear as a separate overlay only where this project has processed observations.</p>
+          <p className="global-description">NISAR is a NASA radar satellite that images the same ground again and again. Start by browsing where it has looked, open a case we have already analysed, or, if you are set up for it, analyse another place.</p>
         </div>
+        <nav className="atlas-goals" aria-label="What would you like to do?">
+          <a href="#observe"><span className="atlas-micro">A · Browse</span><strong>Explore worldwide observations</strong><small>Satellite coverage only. Nothing is detected here.</small></a>
+          <a href="#cases"><span className="atlas-micro">B · Open</span><strong>Explore processed cases</strong><small>Results we have already computed and checked.</small></a>
+          <a href="#process"><span className="atlas-micro">C · Advanced</span><strong>Process another place</strong><small>Runs change detection on this computer.</small></a>
+        </nav>
       </section>
+
+      {featured && (
+        <section className="atlas-featured" aria-labelledby="featured-case-title">
+          <div>
+            <p className="atlas-micro">Featured processed case · real NISAR data</p>
+            <h2 id="featured-case-title">{featured.name}, Bangladesh</h2>
+            <p>Seven NISAR observations from {featured.dates[0]} to {featured.dates[featured.dates.length - 1]}. At the peak ({featured.date}) the radar-change rules flagged <b>{featured.area.toFixed(2)} km²</b> in <b>{featured.regions}</b> regions.</p>
+            <p className="atlas-check"><i aria-hidden="true" /><span>Independent optical check: <b>{featured.status === "INCONCLUSIVE" ? "inconclusive" : featured.status === "CROSS_SENSOR_CHECK" ? "completed" : "not run"}</b>{featured.coverage != null ? ` (${(featured.coverage * 100).toFixed(1)}% of the area could be compared)` : ""}. Candidates are not confirmed flooding.</span></p>
+          </div>
+          <div className="atlas-featured__actions">
+            <Link href="/wetland" className="atlas-primary">Open the case</Link>
+            <button type="button" className="atlas-secondary" onClick={locateFeatured}>Show on the world map</button>
+            <span className="atlas-micro">Boundary: mapped haor polygon. Source: NASA NISAR L2 GCOV (provisional).</span>
+          </div>
+        </section>
+      )}
 
       <div className="global-status-row detection-status" aria-live="polite">
         <div className="global-count">
-          <strong>{loading ? "…" : isNisar ? (data?.stats?.patches ?? detections.features.length).toLocaleString() : "—"}</strong>
-          <span>radar-change candidates · processed areas only</span>
+          <strong>{loading ? "…" : isNisar ? (data?.stats?.patches ?? detections.features.length).toLocaleString() : usingShowcase ? (featured?.regions ?? 0).toLocaleString() : "—"}</strong>
+          <span>{usingShowcase ? "radar-change candidates in the featured case (peak date)" : "radar-change candidates in processed areas only"}</span>
         </div>
         <div className="global-status-meta">
           <span className={`global-source-pill ${mosaicStatus === "loading" ? "global-source-pill--loading" : mosaicStatus === "error" ? "global-source-pill--error" : "global-source-pill--live"}`}><i aria-hidden="true" />{mosaicStatus === "loading" ? "Loading global NISAR mosaic…" : mosaicStatus === "error" ? "NISAR mosaic unavailable" : "NASA GIBS · daily"}</span>
@@ -330,16 +378,16 @@ export default function GlobalDetectionsExplorer() {
         </div>
       </div>
 
-      <section className="global-workspace detection-workspace" aria-label="Worldwide NISAR observation map with local candidate overlay">
+      <section id="observe" className="global-workspace detection-workspace" aria-label="A. Worldwide NISAR observations">
         <div className="global-map-panel">
           <div className="global-map-topline">
-            <span>WORLDWIDE NISAR GCOV BACKSCATTER</span>
+            <span>A · Worldwide observations: radar mosaic and acquisition footprints</span>
             <span>Daily acquisition mosaic{mosaicDate ? ` · ${mosaicDate}` : " · latest available"} · {coverage.features.length.toLocaleString()} catalog footprints</span>
           </div>
           <div id="global-nisar-map" className="global-map-wrap" role="region" aria-label="Worldwide NISAR backscatter mosaic with processed candidate overlay">
             <GlobalNisarDetectionMap
-              detections={detections}
-              boundary={isNisar ? data?.boundary ?? null : null}
+              detections={isNisar ? detections : showcaseDetections ?? detections}
+              boundary={isNisar ? data?.boundary ?? null : (showcase?.boundary as unknown as BoundaryCollection | null) ?? null}
               coverage={coverage}
               date={mosaicDate || null}
               focusStudyArea={focusStudyArea}
@@ -354,7 +402,7 @@ export default function GlobalDetectionsExplorer() {
             {areaDrawing && <div className="nisar-drawing-notice" role="status">Click two opposite corners to select your study area. <button type="button" onClick={() => setAreaDrawing(false)}>Cancel</button></div>}
             {!loading && !isNisar && <div className="detection-map-badge" role="status">No detector result loaded · blank map areas are not classified</div>}
             {!loading && isNisar && detections.features.length === 0 && <div className="detection-map-badge" role="status">No candidates inside the processed boundary for {data?.selected_date} · elsewhere: no result</div>}
-            {error && <div className="detection-map-badge detection-map-badge--error" role="alert">Could not load detector output: {error}</div>}
+            {error && !usingShowcase && <div className="detection-map-badge" role="status">No processed run is loaded on this computer, so only worldwide observations are shown.</div>}
             {mosaicStatus === "error" && <div className="detection-map-badge detection-map-badge--error" role="alert">NASA has no mosaic tiles for this date, or the tile service is unreachable. Choose another date or open NASA Worldview.</div>}
           </div>
           <div className="global-map-legend detection-legend" aria-label="Map legend">
@@ -483,13 +531,7 @@ export default function GlobalDetectionsExplorer() {
         </aside>
       </section>
 
-      <NisarProcessingPanel bounds={areaBounds} boundary={areaBoundary} drawing={areaDrawing}
-        onDraw={setAreaDrawing} onAreaChange={applyArea}
-        savedAreas={savedRuns} onLoadSavedArea={loadSavedAreaForProcessing}
-        loadedArea={isNisar && data?.boundary && data.baseline_date && data.case_study?.event_date ? {
-          runId: data.run_id, name: data.site_name || data.case_study.site || "Study area", boundary: data.boundary,
-          baselineDate: data.baseline_date, eventDate: data.case_study.event_date } : null}
-        onRunReady={loadFinishedRun} />
+      <div id="cases" className="atlas-cases-anchor"><p className="atlas-micro">B · Processed cases</p><h2>Results from processed observations</h2><p>These sections describe the case loaded from a saved local run. The featured case above is available without any local setup.</p></div>
       {isNisar && data?.selected_date && !loading && <RadarComparison runId={data.run_id} date={data.selected_date} refreshKey={refreshKey} />}
       {isNisar && data?.selected_date && !loading && <SavedDateCheck runId={data.run_id} date={data.selected_date} refreshKey={refreshKey} />}
 
@@ -569,6 +611,21 @@ export default function GlobalDetectionsExplorer() {
       <MozambiqueFloodCase onLocate={locateMozambiqueCase} />
 
       {isNisar && data?.case_study && !loading && <ReferenceEvidence runId={data.run_id} refreshKey={refreshKey} />}
+
+      <section id="process" className="atlas-process" aria-labelledby="process-title">
+        <div className="atlas-process__head">
+          <p className="atlas-micro">C · Advanced</p><h2 id="process-title">Process another place</h2>
+          <p>Searching the global catalogue only lists observations. <b>Change detection runs only when you launch processing</b> in step 3, on this computer. If you only want to explore, you can skip this section.</p>
+          <ol className="atlas-steps"><li><b>Choose or draw</b> a study area on the map.</li><li><b>Search</b> for NISAR observations that can be compared fairly.</li><li><b>Select</b> observations and launch the local processing workflow.</li><li><b>Follow</b> the progress.</li><li><b>Inspect</b> the results in the processed cases above.</li></ol>
+        </div>
+      <NisarProcessingPanel bounds={areaBounds} boundary={areaBoundary} drawing={areaDrawing}
+        onDraw={setAreaDrawing} onAreaChange={applyArea}
+        savedAreas={savedRuns} onLoadSavedArea={loadSavedAreaForProcessing}
+        loadedArea={isNisar && data?.boundary && data.baseline_date && data.case_study?.event_date ? {
+          runId: data.run_id, name: data.site_name || data.case_study.site || "Study area", boundary: data.boundary,
+          baselineDate: data.baseline_date, eventDate: data.case_study.event_date } : null}
+        onRunReady={loadFinishedRun} />
+      </section>
 
       <footer className="global-footer detection-footer">
         <span>Global observation source: NASA GIBS daily NISAR L2 GCOV mosaic.</span>

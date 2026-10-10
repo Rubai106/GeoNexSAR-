@@ -12,7 +12,7 @@ import type {
 /* ── Wetland Pulse ─────────────────────────────────── */
 
 export const SAMPLE_PULSE: WetlandPulseData = {
-  site: "Hakaluki Haor",
+  site: "Demonstration wetland",
   wetland_area_km2: 54.0,
   dates: [
     { date: "2026-06-18", area_km2: 12.4, fraction: 0.23, mean_delta_db: 1.2, patches: 8 },
@@ -235,7 +235,7 @@ export const SAMPLE_SENSITIVITY: SensitivityData = {
 
 export const SAMPLE_EVIDENCE: EvidenceCardData = {
   region_id: "wetland_patch_002",
-  region_name: "Patch 02 — SE Hakaluki",
+  region_name: "Patch 02 — south-east",
   date: "24 Jul 2026",
   candidate_area_km2: 5.67,
   valid_fraction: 0.91,
@@ -248,7 +248,7 @@ export const SAMPLE_EVIDENCE: EvidenceCardData = {
   provenance: {
     observed: ["HH backscatter", "HV backscatter", "Acquisition date", "Product metadata"],
     derived: ["ΔHH = 4.1 dB", "ΔHV = 0.7 dB", "Candidate area = 5.67 km²", "Expansion rate"],
-    contextual: ["Wetland boundary (Hakaluki Haor)", "ESA WorldCover land cover"],
+    contextual: ["Wetland boundary (fictional)", "ESA WorldCover land cover"],
     potential: ["Vegetated inundation signal", "Double-bounce scattering hypothesis"],
   },
 };

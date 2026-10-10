@@ -73,8 +73,8 @@ function MapScope({
 
 function detectionStyle(feature?: Feature<Geometry, DetectionProperties>): PathOptions {
   const classification = feature?.properties?.classification;
-  const color = classification === "OPEN_WATER" ? "#42d8ef"
-    : classification === "VEGETATED_INUNDATION" ? "#83e36f" : "#ffbf69";
+  // Derived radar-change candidates are always orange (never green/"true"); class is shown by lightness and the legend.
+  const color = classification === "OPEN_WATER" ? "#F2A45A" : classification === "VEGETATED_INUNDATION" ? "#F7D2A6" : "#8996A0";
   return { color, fillColor: color, weight: 1.5, opacity: 0.95, fillOpacity: 0.48 };
 }
 
@@ -85,7 +85,7 @@ function AreaPicker({ drawing, bounds, onSelected }: { drawing: boolean; bounds:
     if (!drawing) return;
     if (!corner.current) {
       corner.current = event.latlng;
-      marker.current = L.circleMarker(event.latlng, { radius: 6, color: "#ffffff", fillColor: "#ffbf69", fillOpacity: 1 }).addTo(map);
+      marker.current = L.circleMarker(event.latlng, { radius: 6, color: "#ffffff", fillColor: "#5AC8D8", fillOpacity: 1 }).addTo(map);
     } else {
       const first = corner.current;
       const second = event.latlng;
@@ -102,7 +102,7 @@ function AreaPicker({ drawing, bounds, onSelected }: { drawing: boolean; bounds:
   useEffect(() => {
     if (bounds && bounds[0] < bounds[2] && bounds[1] < bounds[3]) map.fitBounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], { padding: [30, 30], maxZoom: 12, animate: false });
   }, [bounds, map]);
-  return bounds && bounds[0] < bounds[2] && bounds[1] < bounds[3] ? <Rectangle bounds={[[bounds[1], bounds[0]], [bounds[3], bounds[2]]]} pathOptions={{ color: "#ffbf69", weight: 2, fillOpacity: 0.08, dashArray: "7 4" }} interactive={false} /> : null;
+  return bounds && bounds[0] < bounds[2] && bounds[1] < bounds[3] ? <Rectangle bounds={[[bounds[1], bounds[0]], [bounds[3], bounds[2]]]} pathOptions={{ color: "#E7AE5C", weight: 2, fillOpacity: 0.08, dashArray: "7 4" }} interactive={false} /> : null;
 }
 
 export default function GlobalNisarDetectionMap({
@@ -170,8 +170,9 @@ export default function GlobalNisarDetectionMap({
           interactive={false}
           style={(feature) => {
             const properties = feature?.properties as CoverageProperties | undefined;
-            const color = properties?.orbitDirection === "Descending" ? "#ffbf69" : "#42d8ef";
-            return { color, fillColor: color, weight: 1, opacity: 0.9, fillOpacity: 0.06 };
+            // Footprints are observations (not detections): cyan = ascending, grey dashed = descending.
+            const desc = properties?.orbitDirection === "Descending"; const color = desc ? "#A7B5BE" : "#5AC8D8";
+            return { color, fillColor: color, weight: 1, opacity: 0.9, fillOpacity: 0.06, dashArray: desc ? "4 3" : undefined };
           }}
         />
       )}
@@ -180,7 +181,7 @@ export default function GlobalNisarDetectionMap({
       {coordinateTarget && <CircleMarker
         center={[coordinateTarget.latitude, coordinateTarget.longitude]}
         radius={7}
-        pathOptions={{ color: "#ffffff", weight: 2, fillColor: "#ffbf69", fillOpacity: 1 }}
+        pathOptions={{ color: "#F0F3F2", weight: 2, fillColor: "#5AC8D8", fillOpacity: 1 }}
       >
         <Popup>
           Map location<br />

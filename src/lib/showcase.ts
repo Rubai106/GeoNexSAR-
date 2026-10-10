@@ -133,14 +133,17 @@ export async function loadShowcasePatches(bundle: ShowcaseBundle, date: string):
   return patches;
 }
 
+const radarCache = new Map<string, RadarPreview | null>();
 export async function loadShowcaseRadar(date: string): Promise<RadarPreview | null> {
+  if (radarCache.has(date)) return radarCache.get(date) ?? null;
   try {
     const response = await fetch(showcaseUrl(`radar/preview_${date}.json`));
-    if (!response.ok) return null;
+    if (!response.ok) { radarCache.set(date, null); return null; }
     const preview = await response.json() as RadarPreview;
     for (const layer of Object.values(preview.layers)) {
       layer.images = Object.fromEntries(Object.entries(layer.images).map(([stage, file]) => [stage, showcaseUrl(file)]));
     }
+    radarCache.set(date, preview);
     return preview;
   } catch { return null; }
 }

@@ -2,8 +2,7 @@
    Beyonders Wetland Module — Design System
    ══════════════════════════════════════════════════════ */
 
-/* ── Google Fonts ──────────────────────────────────── */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Lora:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600;700;800&display=swap");
+/* Fonts are self-hosted (see src/styles/atlas.css). */
 
 /* ── CSS Custom Properties ─────────────────────────── */
 :root {

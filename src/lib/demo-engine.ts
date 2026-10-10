@@ -54,7 +54,7 @@ export function buildDemo(dateIndex = 3, threshold = 2, patchId?: string) {
       mean_delta_db: area ? round(candidates.reduce((sum, p) => sum + p.mean_delta_db * p.area_km2, 0) / area) : 0 };
   });
   const peakIndex = dates.reduce((best, d, i) => d.area_km2 > dates[best].area_km2 ? i : best, 0);
-  const pulseData: WetlandPulseData = { site: "Hakaluki Haor · fictional scenario", wetland_area_km2: 54,
+  const pulseData: WetlandPulseData = { site: "Demonstration wetland · fictional scenario", wetland_area_km2: 54,
     data_source: "SIMULATED_DEMO", dates, onset: dates[0].date,
     peak: { date: dates[peakIndex].date, area_km2: dates[peakIndex].area_km2 },
     recession_start: dates[Math.min(peakIndex + 1, dates.length - 1)].date };

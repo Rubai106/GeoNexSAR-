@@ -153,7 +153,7 @@ export default function NisarProcessingPanel({ bounds, boundary, drawing, onDraw
   const pairValid = usableSearch && before !== after && (usableSearch.scenes.findIndex((s) => s.name === before) < usableSearch.scenes.findIndex((s) => s.name === after));
   const chosenSize = usableSearch?.scenes.filter((s) => s.name === before || s.name === after).reduce((n, s) => n + (s.full_granule_gb || 0), 0);
   return <section className="nisar-tools-section" id="nisar-process" aria-labelledby="nisar-process-title">
-    <div className="nisar-tools-heading"><div><p className="global-eyebrow">PROCESS ANOTHER PLACE</p><h2 id="nisar-process-title">Find a pair. See what changed.</h2>
+    <div className="nisar-tools-heading"><div><p className="global-eyebrow">LOCAL WORKFLOW</p><h2 id="nisar-process-title">Find a pair. See what changed.</h2>
       <p>Name the place, select its area on the map, then search real NISAR observations.</p></div>
       <span className="global-source-pill">Local processor · Earthdata Login required for science files</span></div>
     <div className="nisar-process-grid">
@@ -189,7 +189,7 @@ export default function NisarProcessingPanel({ bounds, boundary, drawing, onDraw
           <button className="nisar-primary-button" type="button" disabled={busy || !pairValid} onClick={() => void startJob("run")}>Process selected NISAR pair</button>
           {!pairValid && <p className="nisar-tool-hint">Choose an after date later than the before date.</p>}</div>}
       </div>
-      <div className="nisar-process-step"><h3>3. Follow the evidence</h3><p>Completed runs include radar layers, candidate polygons, dates, rules, uncertainty and an attempted independent HLS comparison.</p>
+      <div className="nisar-process-step"><h3>3. Select, launch and follow</h3><p>Completed runs include radar layers, candidate polygons, dates, rules, uncertainty and an attempted independent HLS comparison.</p>
         <div className="nisar-job-status" role="status" aria-live="polite" aria-busy={busy}><strong>{busy ? "Working…" : job?.status === "FAILED" ? "Job failed" : job?.status === "COMPLETE" ? "Job complete" : "Ready when you are"}</strong><span>{submitting ? "Starting local processor…" : job?.stage || "Select an area and search for observations."}</span>
           {busy && <span>Progress updates here. The local job continues if you refresh this page.</span>}
           {job?.action === "reference" && job.result?.reference_status && <span>Reference result for run {job.result.run_id?.slice(0, 8)}: {job.result.reference_status} · {job.result.evaluated_pairs ?? 0} pairs checked{job.result.run_id !== loadedArea?.runId ? " · previous analysis" : ""}</span>}

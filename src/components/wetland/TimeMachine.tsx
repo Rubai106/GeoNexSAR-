@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo } from "react";
 import { useWetlandStore } from "@/lib/store";
 import { datesWithPatches, nextAvailableIndex } from "@/lib/showcase";
+import { Icon } from "./icons";
 import { daysBetween, fmtDate, phases } from "@/lib/story";
 
 const BASE_MS = 1700;
@@ -50,10 +51,10 @@ export default function TimeMachine() {
   return (
     <section className="wx-timeline" aria-label="Observation timeline" data-locked={lock ? "true" : "false"}>
       <div className="wx-timeline__controls">
-        <button className="wx-play" onClick={play} aria-pressed={isPlaying} disabled={usable < 2} title={usable < 2 ? "Playback needs at least two dates with exported results" : undefined}>{isPlaying ? "❚❚ PAUSE" : atEnd ? "↺ REPLAY" : "▶ PLAY CHANGE"}</button>
+        <button className="wx-play" onClick={play} aria-pressed={isPlaying} disabled={usable < 2} title={usable < 2 ? "Playback needs at least two dates with exported results" : undefined}>{isPlaying ? <>{Icon.pause}<span>Pause</span></> : atEnd ? <>{Icon.replay}<span>Replay</span></> : <>{Icon.play}<span>Play change</span></>}</button>
         <div className="wx-step" role="group" aria-label="Step through observations">
-          <button onClick={() => { setIsPlaying(false); setSelectedDateIndex(prev); }} disabled={prev < 0} aria-label="Previous observation">‹</button>
-          <button onClick={() => { setIsPlaying(false); setSelectedDateIndex(next); }} disabled={next < 0} aria-label="Next observation">›</button>
+          <button onClick={() => { setIsPlaying(false); setSelectedDateIndex(prev); }} disabled={prev < 0} aria-label="Previous observation">{Icon.prev}</button>
+          <button onClick={() => { setIsPlaying(false); setSelectedDateIndex(next); }} disabled={next < 0} aria-label="Next observation">{Icon.next}</button>
         </div>
         <div className="wx-jumps" role="group" aria-label="Jump to phase">
           {pulseData.onset && ok(pulseData.onset) && <button onClick={() => jump(pulseData.onset)}>Onset</button>}
@@ -65,15 +66,16 @@ export default function TimeMachine() {
         </div>
         <div className="wx-now" aria-live="polite">
           <strong>{fmtDate(cur.date, { month: "short", day: "numeric", year: "numeric" })}</strong>
-          <span>{cur.area_km2.toFixed(2)} km² · {cur.patches} regions</span>
+          <span className="wx-mono">{cur.area_km2.toFixed(2)} km² flagged · {cur.patches} regions</span>
         </div>
       </div>
 
       <div className="wx-track" role="group" aria-label="Observations on a real time axis">
+        <span className="wx-track__cap">Dots are real NISAR acquisitions. Bar height is flagged area. Nothing is drawn between dates.</span>
         <div className="wx-track__axis" />
         {geometry.gaps.map((g) => (
           <div key={g.from.date} className="wx-gap" style={{ left: `${g.from.x}%`, width: `${g.to.x - g.from.x}%` }}>
-            <span>{g.days}-day gap · no observation</span>
+            <span>{g.days}-day gap, no observation</span>
           </div>
         ))}
         {geometry.marks.map((m) => {
@@ -86,7 +88,7 @@ export default function TimeMachine() {
               <i className="wx-obs__stem" style={{ height: `${Math.max(6, m.h * 0.5)}px` }} />
               <i className="wx-obs__dot" />
               <span className="wx-obs__date">{fmtDate(m.date)}</span>
-              {phase && ok(m.date) && <span className="wx-obs__phase">{phase.label.toUpperCase()}</span>}
+              {phase && ok(m.date) && <span className="wx-obs__phase">{phase.label}</span>}
             </button>
           );
         })}

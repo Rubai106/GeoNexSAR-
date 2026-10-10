@@ -51,41 +51,62 @@ export const interpretationOfClass = (c: WetlandPatch["classification"]) =>
       : "Uncertain radar change candidate";
 
 export type StackStatus = "PASS" | "PARTIAL" | "FAIL" | "UNAVAILABLE";
-export interface StackRow { key: string; label: string; status: StackStatus; detail: string; magnitude?: number }
+export interface StackRow { key: string; label: string; kind: "observed" | "derived" | "context" | "unassessed"; status: StackStatus; detail: string; magnitude?: number }
 
-/** What evidence exists — not how confident anyone is. */
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+const shortId = (id: string) => id.replace(/^wetland_patch_/, "").slice(0, 6);
+export const regionLabel = (id: string) => `Region ${shortId(id)}`;
+
+/** What evidence exists, in the pipeline's own terms. These are test outcomes, never a probability. */
 export function evidenceStack(patch: WetlandPatch, optical: OpticalState): StackRow[] {
   const mag = (db: number) => Math.min(1, Math.abs(db) / 10);
+  const overlap = patch.temporal_overlap_fraction;
   const opticalRow: StackRow = optical === "SUPPORT_LIMITED"
-    ? { key: "optical", label: "Optical context (HLS)", status: "PARTIAL", detail: "Comparison ran on shared clear pixels only" }
-    : optical === "INCONCLUSIVE" ? { key: "optical", label: "Optical context (HLS)", status: "UNAVAILABLE", detail: "Inconclusive — too little common clear area" }
-      : { key: "optical", label: "Optical context (HLS)", status: "UNAVAILABLE", detail: optical === "SIMULATED" ? "Not part of the simulation" : "Not run for this study" };
+    ? { key: "optical", label: "Independent optical check", kind: "context", status: "PARTIAL", detail: "Compared only where both optical dates were clear" }
+    : optical === "INCONCLUSIVE" ? { key: "optical", label: "Independent optical check", kind: "unassessed", status: "UNAVAILABLE", detail: "Inconclusive: too little shared clear sky to judge" }
+      : { key: "optical", label: "Independent optical check", kind: "unassessed", status: "UNAVAILABLE", detail: optical === "SIMULATED" ? "Not part of the simulation" : "Not run for this study" };
   return [
-    { key: "hh", label: "NISAR HH", status: Math.abs(patch.delta_hh) >= 1 ? "PASS" : "PARTIAL", detail: `${patch.hh_before.toFixed(1)} → ${patch.hh_after.toFixed(1)} dB (Δ ${patch.delta_hh.toFixed(1)})`, magnitude: mag(patch.delta_hh) },
-    { key: "hv", label: "NISAR HV", status: Math.abs(patch.delta_hv) >= 1 ? "PASS" : "PARTIAL", detail: `${patch.hv_before.toFixed(1)} → ${patch.hv_after.toFixed(1)} dB (Δ ${patch.delta_hv.toFixed(1)})`, magnitude: mag(patch.delta_hv) },
-    { key: "temporal", label: "Seen on multiple dates", status: patch.temporal_status, detail: patch.temporal_status === "PASS" ? "Persistence test passed" : patch.temporal_status === "PARTIAL" ? "Partly persistent" : "Not persistent" },
-    { key: "spatial", label: "Persists across nearby pixels", status: patch.spatial_status, detail: patch.spatial_status === "PASS" ? "Local consistency test passed" : patch.spatial_status === "PARTIAL" ? "Partly consistent" : "Not locally consistent" },
-    { key: "quality", label: "Data quality", status: patch.quality_status, detail: `${(patch.valid_fraction * 100).toFixed(0)}% valid coverage` },
+    { key: "hh", label: "HH radar change", kind: "observed", status: Math.abs(patch.delta_hh) >= 1 ? "PASS" : "PARTIAL", detail: `${patch.hh_before.toFixed(1)} → ${patch.hh_after.toFixed(1)} dB (Δ ${patch.delta_hh.toFixed(1)} dB)`, magnitude: mag(patch.delta_hh) },
+    { key: "hv", label: "HV radar change", kind: "observed", status: Math.abs(patch.delta_hv) >= 1 ? "PASS" : "PARTIAL", detail: `${patch.hv_before.toFixed(1)} → ${patch.hv_after.toFixed(1)} dB (Δ ${patch.delta_hv.toFixed(1)} dB)`, magnitude: mag(patch.delta_hv) },
+    { key: "temporal", label: "Same place flagged on the previous date", kind: "derived", status: patch.temporal_status,
+      detail: overlap == null ? "No earlier observation to compare" : `${pct(overlap)} of this region was also flagged on the previous date` },
+    { key: "spatial", label: "Compact footprint", kind: "derived", status: patch.spatial_status,
+      detail: patch.spatial_status === "PASS" ? "Fills at least half of its bounding box" : "Fills under half of its bounding box (ragged or scattered)" },
+    { key: "threshold", label: "Survives a stricter cutoff", kind: "derived", status: patch.threshold_stability === "STABLE" ? "PASS" : "PARTIAL",
+      detail: `${pct(patch.threshold_variation_fraction ?? 0)} of its pixels drop out when the cutoff rises by 1 dB` },
+    { key: "quality", label: "Data quality", kind: "observed", status: patch.quality_status, detail: `${pct(patch.valid_fraction)} of the region has valid data in all four channels` },
     opticalRow,
-    { key: "truth", label: "Ground truth", status: "UNAVAILABLE", detail: "No field observations in this study" },
+    { key: "truth", label: "Ground truth", kind: "unassessed", status: "UNAVAILABLE", detail: "No field observations in this study" },
   ];
 }
 
-export interface ChallengeResult { passes: string[]; warnings: string[]; status: string; interpretation: string; independent: string; validation: string; recommendation: string }
+export interface ChallengeItem { tone: "ok" | "warn" | "note"; text: string; detail?: string }
+export interface ChallengeResult { items: ChallengeItem[]; passes: string[]; warnings: string[]; status: string; interpretation: string; independent: string; validation: string; recommendation: string; alternatives: string[] }
 
-export function challenge(patch: WetlandPatch, optical: OpticalState): ChallengeResult {
-  const passes: string[] = []; const warnings: string[] = [];
-  (patch.temporal_status === "PASS" ? passes : warnings).push(patch.temporal_status === "PASS" ? "Multi-date persistence" : "Persistence across dates is not fully shown");
-  (patch.spatial_status === "PASS" ? passes : warnings).push(patch.spatial_status === "PASS" ? "Spatial consistency" : "Local spatial consistency is not fully shown");
-  (Math.abs(patch.delta_hh) >= 1 ? passes : warnings).push(Math.abs(patch.delta_hh) >= 1 ? "HH response" : "HH response is small");
-  (Math.abs(patch.delta_hv) >= 1 ? passes : warnings).push(Math.abs(patch.delta_hv) >= 1 ? "HV response" : "HV response is small");
-  if (patch.threshold_stability === "STABLE") passes.push("Survives nearby detection thresholds"); else warnings.push("Sensitive to the detection threshold");
-  if (patch.quality_status !== "PASS") warnings.push("Data quality is not fully passing");
-  warnings.push(optical === "SUPPORT_LIMITED" ? "Optical coverage limited" : optical === "INCONCLUSIVE" ? "Optical comparison inconclusive" : "No optical comparison");
-  warnings.push("No field truth", "Radar response may have multiple causes");
+/** Only checks whose data exist. Nothing is scored. */
+export function challenge(patch: WetlandPatch, optical: OpticalState, extra?: { baselineMad?: number | null; baselineCount?: number; opticalReason?: string; referenceLimitations?: string[] }): ChallengeResult {
+  const items: ChallengeItem[] = []; const overlap = patch.temporal_overlap_fraction;
+  items.push(patch.threshold_stability === "STABLE"
+    ? { tone: "ok", text: "Survives other tested thresholds", detail: `${pct(patch.threshold_variation_fraction ?? 0)} of its pixels drop out when the cutoff rises by 1 dB` }
+    : { tone: "warn", text: "Sensitive to the detection threshold", detail: `${pct(patch.threshold_variation_fraction ?? 0)} of its pixels drop out when the cutoff rises by 1 dB (stable is 20% or less)` });
+  items.push(overlap == null ? { tone: "note", text: "No earlier observation to compare", detail: "This is the first processed date" }
+    : patch.temporal_status === "PASS" ? { tone: "ok", text: "Also flagged on the previous date", detail: `${pct(overlap)} overlap with the previous observation` }
+      : { tone: "warn", text: "Not clearly persistent", detail: `${pct(overlap)} overlap with the previous observation (needs 50%)` });
+  items.push(patch.spatial_status === "PASS" ? { tone: "ok", text: "Compact footprint" } : { tone: "warn", text: "Ragged or scattered footprint", detail: "Fills under half of its bounding box" });
+  items.push(Math.abs(patch.delta_hh) >= 1 && Math.abs(patch.delta_hv) >= 1 ? { tone: "ok", text: "Both HH and HV changed by at least 1 dB" }
+    : { tone: "warn", text: Math.abs(patch.delta_hh) >= 1 ? "HV barely changed" : "HH change is small", detail: `ΔHH ${patch.delta_hh.toFixed(1)} dB · ΔHV ${patch.delta_hv.toFixed(1)} dB` });
+  if (extra?.baselineMad != null) items.push({ tone: "note", text: "Compared with the baseline's own variability",
+    detail: `Change of ${Math.abs(patch.delta_hh).toFixed(1)} dB against a baseline spread (median absolute deviation) of ${extra.baselineMad.toFixed(2)} dB, from ${extra.baselineCount ?? 1} earlier observation${(extra.baselineCount ?? 1) === 1 ? "" : "s"}` });
+  if (patch.quality_status !== "PASS") items.push({ tone: "warn", text: "Data quality is not fully passing" });
+  items.push(optical === "SUPPORT_LIMITED" ? { tone: "warn", text: "Optical coverage is limited", detail: "Compared only where both optical dates were clear" }
+    : optical === "INCONCLUSIVE" ? { tone: "warn", text: "Independent optical check is inconclusive", detail: extra?.opticalReason ?? "Too little shared clear sky" }
+      : { tone: "warn", text: "No independent optical check" });
+  items.push({ tone: "warn", text: "No field truth" });
   const it = interpret(patch, optical);
-  return { passes, warnings, status: "RADAR CHANGE DETECTED", interpretation: it.headline,
-    independent: optical === "SUPPORT_LIMITED" ? "Limited" : "None available", validation: "Incomplete", recommendation: "Needs investigation" };
+  const alternatives = extra?.referenceLimitations?.length ? extra.referenceLimitations
+    : ["Radar darkening alone does not distinguish new water from changes in existing water or other scattering changes.", "Surface roughness, soil moisture and vegetation changes can also alter the radar signal."];
+  return { items, passes: items.filter((i) => i.tone === "ok").map((i) => i.text), warnings: [...items.filter((i) => i.tone === "warn").map((i) => i.text), "Radar response may have multiple causes"],
+    status: "Radar change candidate", interpretation: it.headline, independent: optical === "SUPPORT_LIMITED" ? "Limited" : "None available", validation: "Incomplete", recommendation: "Needs investigation", alternatives };
 }
 
 /** WHAT HAPPENED? — assembled strictly from loaded values. */

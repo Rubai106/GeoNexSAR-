@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useWetlandStore } from "@/lib/store";
 
 export default function Header() {
-  const { demoMode, pipelineRunId } = useWetlandStore();
+  const { demoMode, pipelineRunId, pulseData } = useWetlandStore();
+  const site = (pulseData?.site ?? "").replace(/\s*·.*$/, "").replace(/\s+mapped boundary$/i, "");
   return (
     <header className="header">
       <div className="header-brand">
@@ -16,7 +17,7 @@ export default function Header() {
       </div>
       <div className="header-meta">
         <div className="header-site">
-          Site: <strong>Hakaluki Haor, Bangladesh</strong>
+          Site: <strong>{site || "Loading…"}{!demoMode && /tanguar|hakaluki/i.test(site) ? ", Bangladesh" : ""}</strong>
         </div>
         <Link className="header-global-link" href="/wetland/global" aria-label="Open the worldwide NISAR map">
           <span aria-hidden="true">◎</span> NISAR world map

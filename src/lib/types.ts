@@ -70,6 +70,14 @@ export interface WetlandPatch {
   spatial_status: QualityStatus;
   temporal_status: QualityStatus;
   threshold_stability: StabilityVerdict;
+  /** Share of the region's pixels lost when the cutoff rises 1 dB (±0.5 dB around base). Stable if 0.2 or less. */
+  threshold_variation_fraction?: number;
+  /** Share of this region also flagged (same class) on the previous observation; null/absent for the first date. */
+  temporal_overlap_fraction?: number | null;
+  baseline_observation_count?: number;
+  baseline_hh_temporal_mad_db?: number | null;
+  baseline_observation_dates?: string[];
+  pixel_count?: number;
   evidence_state: EvidenceState;
   hh_before: number;
   hh_after: number;

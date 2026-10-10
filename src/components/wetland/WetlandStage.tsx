@@ -34,23 +34,29 @@ function treatment(p: WetlandPatch) {
 function FitView() {
   const map = useMap();
   const { patches, pulseData, siteBoundary, demoMode, pipelineRunId } = useWetlandStore();
+  const key = demoMode ? "demo" : pipelineRunId ?? "none";
   const fitted = useRef<string | null>(null);
+
+  // Fit only when the container has a real size (the grid layout can report 0 on first paint), once per case.
+  const fit = React.useCallback(() => {
+    if (fitted.current === key) return;
+    const size = map.getSize(); if (size.x < 50 || size.y < 50) return;
+    const { patches: ps, pulseData: pd, siteBoundary: sb, demoMode: dm } = useWetlandStore.getState();
+    const pad = { paddingTopLeft: [24, 72] as [number, number], paddingBottomRight: [64, 24] as [number, number] };
+    if (dm) { map.fitBounds(DEMO_BOUNDS, { ...pad, maxZoom: 13, animate: false }); fitted.current = key; return; }
+    const b = pd?.site_bounds;
+    if (b && b.length === 4 && b.every(Number.isFinite)) { map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { ...pad, maxZoom: 13, animate: false }); fitted.current = key; return; }
+    const bpts = sb?.features.flatMap((f) => points(f.geometry)) ?? [];
+    const pts = bpts.length ? bpts : ps.flatMap((p) => (p.geometry ? points(p.geometry) : [p.centroid]));
+    if (pts.length) { map.fitBounds(pts, { ...pad, maxZoom: 13, animate: false }); fitted.current = key; }
+  }, [map, key]);
+
   useEffect(() => {
-    const ro = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+    const ro = new ResizeObserver(() => { map.invalidateSize({ pan: false }); fit(); });
     ro.observe(map.getContainer());
     return () => ro.disconnect();
-  }, [map]);
-  useEffect(() => {
-    const key = demoMode ? "demo" : pipelineRunId ?? "none";
-    if (fitted.current === key) return;
-    const pad = { paddingTopLeft: [24, 120] as [number, number], paddingBottomRight: [24, 150] as [number, number] };
-    if (demoMode) { map.fitBounds(DEMO_BOUNDS, { ...pad, maxZoom: 12 }); fitted.current = key; return; }
-    const b = pulseData?.site_bounds;
-    if (b && b.length === 4 && b.every(Number.isFinite)) { map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { ...pad, maxZoom: 12 }); fitted.current = key; return; }
-    const bpts = siteBoundary?.features.flatMap((f) => points(f.geometry)) ?? [];
-    const pts = bpts.length ? bpts : patches.flatMap((p) => (p.geometry ? points(p.geometry) : [p.centroid]));
-    if (pts.length) { map.fitBounds(pts, { ...pad, maxZoom: 12 }); fitted.current = key; }
-  }, [map, patches, pulseData, siteBoundary, demoMode, pipelineRunId]);
+  }, [map, fit]);
+  useEffect(() => { map.invalidateSize({ pan: false }); fit(); }, [map, fit, patches, pulseData, siteBoundary]);
   return null;
 }
 
@@ -121,15 +127,17 @@ function PatchLayer({ list, interactive, dim }: { list: WetlandPatch[]; interact
   const { selectedPatch, setSelectedPatch, setDrawer, vegFilter, viewMode, pulseData, selectedDateIndex, probeActive } = useWetlandStore();
   const isPeak = pulseData?.dates[selectedDateIndex]?.date === pulseData?.peak.date;
   const shown = useMemo(() => (vegFilter === "ALL" ? list : list.filter((p) => p.classification === vegFilter)), [list, vegFilter]);
-  const hue = (p: WetlandPatch) => viewMode === "DETECTION" ? (p.classification === "OPEN_WATER" ? "#5bc0eb" : p.classification === "VEGETATED_INUNDATION" ? "#e0b341" : "#a9a69b") : "#f2a65a";
+  // Hundreds of SVG regions must not each be a Tab stop. Keyboard users select regions from the investigation panel list instead.
+  useEffect(() => { document.querySelectorAll(".wx-patch").forEach((el) => el.setAttribute("tabindex", "-1")); });
+  const hue = (p: WetlandPatch) => viewMode === "DETECTION" ? (p.classification === "OPEN_WATER" ? "#F2A45A" : p.classification === "VEGETATED_INUNDATION" ? "#F7D2A6" : "#8996A0") : "#F2A45A";
   return <>{shown.map((p) => {
-    const t = treatment(p); const sel = selectedPatch?.id === p.id; const color = sel ? "#ffffff" : hue(p);
+    const t = treatment(p); const sel = selectedPatch?.id === p.id; const color = sel ? "#F0F3F2" : hue(p);
     return <Polygon key={`${p.id}-${p.date}`} positions={positions(p)}
       className={`${t.cls}${isPeak && !dim ? " wx-patch--peak" : ""}`}
       pathOptions={{ color, weight: sel ? 3 : t.weight, fillColor: hue(p), fillOpacity: (dim && !sel ? 0.1 : t.fill), dashArray: t.dash }}
       interactive={interactive}
       eventHandlers={interactive ? { click: () => { if (!probeActive) { setSelectedPatch(p); setDrawer("INVESTIGATE"); } } } : undefined}>
-      {interactive && <Tooltip sticky direction="top" className="wx-tip">Region {p.id.split("_").pop()} · {p.area_km2.toFixed(2)} km²</Tooltip>}
+      {interactive && <Tooltip sticky direction="top" className="wx-tip">{`Region ${p.id.replace(/^wetland_patch_/, "").slice(0, 6)}`} · {p.area_km2.toFixed(3)} km²</Tooltip>}
     </Polygon>;
   })}</>;
 }
@@ -151,10 +159,10 @@ export default function WetlandStage() {
     <div className="wx-stage" ref={wrap}>
       <MapContainer center={MAP_CONFIG.center} zoom={11} minZoom={5} maxZoom={17} zoomControl={false} style={{ width: "100%", height: "100%" }}>
         <FitView />
-        <ZoomControl position="bottomright" />
+        <ZoomControl position="bottomleft" />
         {satelliteBasemap && <TileLayer url={MAP_CONFIG.tileUrl} attribution={MAP_CONFIG.tileAttribution} />}
         {viewMode === "RADAR" && <RadarOverlay />}
-        {siteBoundary && <Pane name="wxBoundary" style={{ zIndex: 420 }}><LeafletGeoJSON data={siteBoundary} interactive={false} style={{ color: "#9fe3f0", weight: 1.5, opacity: 0.9, fillOpacity: 0, dashArray: "6 5" }} /></Pane>}
+        {siteBoundary && <Pane name="wxBoundary" style={{ zIndex: 420 }}><LeafletGeoJSON data={siteBoundary} interactive={false} style={{ color: "#5AC8D8", weight: 1.5, opacity: 0.9, fillOpacity: 0, dashArray: "6 5" }} /></Pane>}
         {lock ? <>
           <Pane name="wxBefore" style={{ zIndex: 400 }}><PatchLayer list={lock.before} interactive={false} dim={false} /></Pane>
           <Pane name="wxAfter" style={{ zIndex: 401 }}><PatchLayer list={lock.after} interactive={false} dim={false} /></Pane>
@@ -173,8 +181,8 @@ export default function WetlandStage() {
             onKeyDown={(e) => { if (e.key === "ArrowLeft") { e.preventDefault(); setSplit((v) => Math.max(2, v - 4)); } if (e.key === "ArrowRight") { e.preventDefault(); setSplit((v) => Math.min(98, v + 4)); } if (e.key === "Home") setSplit(2); if (e.key === "End") setSplit(98); }}>
             <span className="wx-split__grip" />
           </div>
-          <div className="wx-split-label wx-split-label--l"><small>BEFORE</small>{fmtDate(dates[lock.beforeIndex]?.date ?? "", { month: "short", day: "numeric", year: "numeric" })}</div>
-          <div className="wx-split-label wx-split-label--r"><small>AFTER</small>{fmtDate(dates[lock.afterIndex]?.date ?? "", { month: "short", day: "numeric", year: "numeric" })}</div>
+          <div className="wx-split-label wx-split-label--l"><small>Before · candidate regions</small>{fmtDate(dates[lock.beforeIndex]?.date ?? "", { month: "short", day: "numeric", year: "numeric" })}</div>
+          <div className="wx-split-label wx-split-label--r"><small>After · candidate regions</small>{fmtDate(dates[lock.afterIndex]?.date ?? "", { month: "short", day: "numeric", year: "numeric" })}</div>
         </>
       )}
     </div>

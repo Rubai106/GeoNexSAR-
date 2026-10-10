@@ -1,200 +1,235 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { showcaseUrl, type ShowcaseReference } from "@/lib/showcase";
 import { useWetlandStore } from "@/lib/store";
-import { challenge, changeStory, evidenceStack, fmtDate, fmtDateLong, interpret, interpretationOfClass, opticalLabel, opticalState, type StackStatus } from "@/lib/story";
-import { Section, TierBadge } from "./ui";
+import { showcaseUrl, type ShowcaseReference } from "@/lib/showcase";
+import { challenge, changeStory, evidenceStack, fmtDate, fmtDateLong, interpret, interpretationOfClass, opticalLabel, opticalState, regionLabel, type StackStatus } from "@/lib/story";
+import { KindTag, Section, TierBadge, ToolFrame, type Kind } from "./ui";
 
-const STATUS_WORD: Record<StackStatus, string> = { PASS: "Supported", PARTIAL: "Partial", FAIL: "Not shown", UNAVAILABLE: "Unavailable" };
+const STATUS_WORD: Record<StackStatus, string> = { PASS: "Passed", PARTIAL: "Partial", FAIL: "Not shown", UNAVAILABLE: "Unavailable" };
+const pct1 = (v: number | null | undefined) => (v == null ? "n/a" : `${(v * 100).toFixed(1)}%`);
 
-/* ── Evidence Stack: what evidence exists, never a confidence score ── */
+/* ── Evidence stack: which evidence exists. A test outcome, never a confidence score. ── */
 export function EvidenceStack() {
   const { selectedPatch: p, dataTier, pulseData } = useWetlandStore();
   if (!p) return null;
   const rows = evidenceStack(p, opticalState(dataTier, pulseData));
   return (
-    <ul className="wx-stack" aria-label="Evidence stack">
+    <ul className="wx-stack" aria-label="Evidence for this region">
       {rows.map((r) => (
         <li key={r.key} data-status={r.status}>
-          <div className="wx-stack__head"><span>{r.label}</span><em>{STATUS_WORD[r.status]}</em></div>
+          <div className="wx-stack__head"><span>{r.label}</span><span className="wx-stack__state"><KindTag kind={r.kind as Kind} />{STATUS_WORD[r.status]}</span></div>
           <div className="wx-stack__bar" aria-hidden="true"><i style={{ width: r.status === "UNAVAILABLE" ? "0%" : r.magnitude != null ? `${Math.max(6, r.magnitude * 100)}%` : r.status === "PASS" ? "100%" : r.status === "PARTIAL" ? "50%" : "8%" }} /></div>
           <small>{r.detail}</small>
         </li>
       ))}
-      <li className="wx-stack__note">HH and HV bars show the size of the measured change on a ±10 dB scale. Other bars show whether a test passed — not a probability.</li>
+      <li className="wx-stack__note">Radar bars show the size of the measured change on a ±10 dB scale. The other bars show whether a test passed. None of them is a probability.</li>
     </ul>
   );
 }
 
-/* ── WHY THIS REGION? ── */
+/* ── Why this region? ── */
 export function InvestigationDrawer() {
-  const { selectedPatch: p, dataTier, pulseData, challengeOpen, setChallengeOpen, showcase } = useWetlandStore();
-  if (!p) return <p className="wx-hint">Click any candidate region on the map. Hover shows its id; click starts the investigation.</p>;
+  const { selectedPatch: p, dataTier, pulseData, challengeOpen, setChallengeOpen, showcase, patches, setSelectedPatch } = useWetlandStore();
+  const largest = useMemo(() => [...patches].sort((a, b) => b.area_km2 - a.area_km2).slice(0, 8), [patches]);
+  if (!p) return (
+    <ToolFrame title="Why this region?" lede="Click a candidate region on the map to see what the radar measured there and which checks it passed."
+      limitation="A candidate region is a possible change that needs interpretation. It is not a confirmed flood.">
+      <p className="wx-empty">Hover a region to see its name and area. Click it to investigate. Press Esc to return to the overview.</p>
+      {largest.length > 0 && <div><p className="wx-micro">Or choose one of the largest regions</p>
+        <ul className="wx-regions">{largest.map((r) => <li key={r.id}><button type="button" onClick={() => setSelectedPatch(r)}><span>{regionLabel(r.id)}</span><span className="wx-mono">{r.area_km2.toFixed(3)} km²</span></button></li>)}</ul></div>}
+    </ToolFrame>
+  );
   const optical = opticalState(dataTier, pulseData);
-  const it = interpret(p, optical); const ch = challenge(p, optical);
-  const sim = p.data_source === "SIMULATED_DEMO";
+  const it = interpret(p, optical); const sim = p.data_source === "SIMULATED_DEMO";
+  const ev = showcase?.reference.evidence;
+  const ch = challenge(p, optical, { baselineMad: p.baseline_hh_temporal_mad_db, baselineCount: p.baseline_observation_count, referenceLimitations: ev?.limitations,
+    opticalReason: showcase?.reference.validation ? String((showcase.reference.validation as { reason?: string }).reason ?? "") || undefined : undefined });
   return (
-    <div className="wx-investigate">
-      <p className="wx-eyebrow">WHY THIS REGION?</p>
-      <h2>Region {p.id.split("_").pop()}<small> · {fmtDateLong(p.date)}</small></h2>
-      {sim && <p className="wx-note wx-note--sim">Simulation. Every value below is fictional; no satellite observation supports it.</p>}
-      <div className="wx-interp"><span>Interpretation</span><strong>{it.headline}</strong><p>{it.note}</p></div>
-
-      <Section eyebrow="WHAT DO WE ACTUALLY KNOW?" title="Evidence stack"><EvidenceStack /></Section>
-
-      <Section eyebrow="RAW → DERIVED → CONTEXT → INTERPRETATION" title="How this was built">
+    <ToolFrame title="Why this region?" lede={`${regionLabel(p.id)} was flagged on ${fmtDateLong(p.date)}. Here is the evidence behind it, and what it cannot tell us.`}
+      limitation="Radar change does not by itself prove flooding. The same signal can come from other changes at the surface."
+      action={<button className="wx-btn wx-btn--primary" onClick={() => setChallengeOpen(!challengeOpen)} aria-expanded={challengeOpen}>{challengeOpen ? "Hide the challenge" : "Challenge this detection"}</button>}>
+      {sim && <p className="wx-note wx-note--sim">Simulation: every value here is fictional.</p>}
+      <dl className="wx-facts">
+        <div><dt>Area</dt><dd>{p.area_km2.toFixed(4)} km²</dd></div>
+        <div><dt>Class</dt><dd>{p.interpretation_label ?? interpretationOfClass(p.classification)}</dd></div>
+        <div><dt>Centroid</dt><dd className="wx-mono">{p.centroid[0].toFixed(4)}°N {p.centroid[1].toFixed(4)}°E</dd></div>
+      </dl>
+      <div className="wx-interp"><span className="wx-micro">Interpretation</span><strong>{it.headline}</strong><p>{it.note}</p></div>
+      <Section eyebrow="Evidence" title="What do we actually know?"><EvidenceStack /></Section>
+      <Section eyebrow="Provenance" title="How this result was built">
         <ol className="wx-flow">
-          <li data-k="observed"><b>OBSERVED</b><span>{sim ? "Simulated HH / HV responses" : "NISAR L2 GCOV HH & HV power"} · acquired {p.date}</span><span>HH {p.hh_before.toFixed(1)} → {p.hh_after.toFixed(1)} dB · HV {p.hv_before.toFixed(1)} → {p.hv_after.toFixed(1)} dB</span></li>
-          <li data-k="derived"><b>DERIVED</b><span>ΔHH {p.delta_hh.toFixed(1)} dB · ΔHV {p.delta_hv.toFixed(1)} dB</span><span>{p.area_km2.toFixed(2)} km² candidate area · {(p.valid_fraction * 100).toFixed(0)}% valid · threshold {p.threshold_stability.toLowerCase()}</span></li>
-          <li data-k="contextual"><b>CONTEXTUAL</b><span>{opticalLabel(optical, showcase?.reference)}</span><span>{sim ? "Fictional boundary" : "Reference study mask — not an official wetland boundary"}</span></li>
-          <li data-k="potential"><b>POTENTIAL INTERPRETATION</b><span>{interpretationOfClass(p.classification)}</span><span>Other scattering explanations remain possible.</span></li>
+          <li><KindTag kind="observed" /><span>{sim ? "Simulated HH/HV responses" : "NISAR L2 GCOV HH and HV power"}, acquired {p.date}</span><span className="wx-mono">HH {p.hh_before.toFixed(1)} → {p.hh_after.toFixed(1)} dB · HV {p.hv_before.toFixed(1)} → {p.hv_after.toFixed(1)} dB</span></li>
+          <li><KindTag kind="derived" /><span>Change after minus before, averaged over {p.pixel_count?.toLocaleString() ?? "the region's"} pixels</span><span className="wx-mono">ΔHH {p.delta_hh.toFixed(1)} dB · ΔHV {p.delta_hv.toFixed(1)} dB</span></li>
+          <li><KindTag kind="context" /><span>{opticalLabel(optical, showcase?.reference)}</span><span>{sim ? "Fictional boundary" : "Reference study mask. It is not an official wetland boundary."}</span></li>
+          <li><KindTag kind="candidate" /><span>{interpretationOfClass(p.classification)}</span><span>Other scattering explanations remain possible.</span></li>
         </ol>
       </Section>
-
-      <button className="wx-challenge" onClick={() => setChallengeOpen(!challengeOpen)} aria-expanded={challengeOpen}>
-        {challengeOpen ? "HIDE THE CHALLENGE" : "CHALLENGE THIS DETECTION"}
-      </button>
       {challengeOpen && (
-        <div className="wx-challenge-panel" role="region" aria-label="Challenge this detection">
-          <p className="wx-eyebrow">WHAT COULD WE BE MISSING?</p>
-          <h3>Can we trust this change?</h3>
-          <ul className="wx-checks">
-            {ch.passes.map((t) => <li key={t} data-k="ok"><i>✓</i>{t}</li>)}
-            {ch.warnings.map((t) => <li key={t} data-k="warn"><i>⚠</i>{t}</li>)}
-          </ul>
+        <section className="wx-challenge" aria-label="Challenge this detection">
+          <p className="wx-micro">What could we be missing?</p><h3>Can we trust this change?</h3>
+          <ul className="wx-checks">{ch.items.map((i) => <li key={i.text} data-tone={i.tone}><i className="wx-dot" aria-hidden="true" /><div><strong>{i.text}</strong>{i.detail && <small>{i.detail}</small>}</div></li>)}</ul>
+          <p className="wx-micro">Other explanations that remain plausible</p>
+          <ul className="wx-plain">{ch.alternatives.map((a) => <li key={a}>{a}</li>)}</ul>
           <dl className="wx-status">
-            <div><dt>Current status</dt><dd>{ch.status}</dd></div>
-            <div><dt>Interpretation</dt><dd>{ch.interpretation}</dd></div>
-            <div><dt>Independent support</dt><dd>{ch.independent}</dd></div>
-            <div><dt>Validation</dt><dd>{ch.validation}</dd></div>
-            <div><dt>Recommendation</dt><dd>{ch.recommendation}</dd></div>
+            <div><dt>Status</dt><dd>{ch.status}</dd></div><div><dt>Interpretation</dt><dd>{ch.interpretation}</dd></div>
+            <div><dt>Independent support</dt><dd>{ch.independent}</dd></div><div><dt>Validation</dt><dd>{ch.validation}</dd></div><div><dt>Recommendation</dt><dd>{ch.recommendation}</dd></div>
           </dl>
-        </div>
+        </section>
       )}
-    </div>
+    </ToolFrame>
   );
 }
 
-/* ── SAR DETECTIVE ── */
+/* ── SAR Detective ── */
 export function DetectiveDrawer() {
-  const { probeResult: r, probeActive, dataTier, selectedPatch } = useWetlandStore();
-  if (!r) return <div className="wx-detective-empty"><p className="wx-eyebrow">SAR DETECTIVE</p><h2>Sample the Earth.</h2><p className="wx-hint">{probeActive ? "Click anywhere on the map to read the radar signal at that location." : "Activate the detective, then click the map."}</p>
-    <p className="wx-note">{dataTier === "LOCAL_RUN" ? "Local run: samples a measured raster cell." : "This build samples the region-average of the candidate polygon under the cursor (no per-pixel raster is published)."}</p></div>;
-  const v = (n: number | null) => (n == null ? "—" : n.toFixed(1));
-  const sim = r.data_source === "SIMULATED";
-  const darkening = (r.delta_hh ?? 0) <= -1; const brightening = (r.delta_hh ?? 0) >= 1;
+  const { probeResult: r, probeActive, dataTier, selectedPatch, setProbeResult } = useWetlandStore();
+  const lede = "Click anywhere on the map to read the radar signal at that place.";
+  const note = dataTier === "LOCAL_RUN" ? "This tier samples one measured raster cell."
+    : "This static showcase ships region-level values only. A sample reports the region average of the candidate under the cursor, not a single pixel.";
+  if (!r) return <ToolFrame title="SAR Detective" lede={lede} limitation="Radar change does not by itself prove flooding."><p className="wx-empty">{probeActive ? "Click the map to take a sample." : "Choose SAR Detective, then click the map."}</p><p className="wx-note">{note}</p></ToolFrame>;
+  const v = (n: number | null) => (n == null ? "n/a" : n.toFixed(1));
+  const sim = r.data_source === "SIMULATED"; const dark = (r.delta_hh ?? 0) <= -1; const bright = (r.delta_hh ?? 0) >= 1;
   return (
-    <div className="wx-detective">
-      <p className="wx-eyebrow">SAR DETECTIVE</p>
-      {sim && <p className="wx-note wx-note--sim">Simulation — values are fictional.</p>}
-      <dl className="wx-loc"><dt>LOCATION</dt><dd>{Math.abs(r.lat).toFixed(4)}° {r.lat >= 0 ? "N" : "S"}<br />{Math.abs(r.lng).toFixed(4)}° {r.lng >= 0 ? "E" : "W"}</dd></dl>
+    <ToolFrame title="SAR Detective" lede={lede}
+      limitation={`Radar change does not by itself prove flooding. ${r.resolution === "REGION" ? "These are region averages, not a single pixel." : "This is one raster cell."}`}
+      action={<button className="wx-btn" onClick={() => setProbeResult(null)}>Clear sample</button>}>
+      {sim && <p className="wx-note wx-note--sim">Simulation: values are fictional.</p>}
+      <dl className="wx-facts"><div><dt>Location</dt><dd className="wx-mono">{Math.abs(r.lat).toFixed(4)}° {r.lat >= 0 ? "N" : "S"}, {Math.abs(r.lng).toFixed(4)}° {r.lng >= 0 ? "E" : "W"}</dd></div>
+        <div><dt>Date</dt><dd className="wx-mono">{r.acquisition_date}</dd></div><div><dt>Resolution</dt><dd>{r.resolution === "REGION" ? `Region average${r.region_id ? ` · ${regionLabel(r.region_id)}` : ""}` : "Single raster cell"}</dd></div></dl>
       {r.valid ? <>
-        {(["HH", "HV"] as const).map((ch) => { const b = ch === "HH" ? r.hh_before : r.hv_before; const a = ch === "HH" ? r.hh_after : r.hv_after; const d = ch === "HH" ? r.delta_hh : r.delta_hv;
-          return <div key={ch} className="wx-sig"><h4>NISAR {ch}</h4><table><tbody><tr><td>Before</td><td>{v(b)} dB</td></tr><tr><td>After</td><td>{v(a)} dB</td></tr><tr className="is-delta"><td>Change</td><td>{d != null && d > 0 ? "+" : ""}{v(d)} dB</td></tr></tbody></table></div>; })}
-        <div className="wx-sig"><h4>TEMPORAL SIGNAL</h4><p>{selectedPatch?.temporal_status === "PASS" ? "Observed across multiple dates" : "Persistence across dates not fully shown"}</p></div>
-        <div className="wx-sig"><h4>SPATIAL SIGNAL</h4><p>{selectedPatch?.spatial_status === "PASS" ? "Strong local consistency" : "Select this region for its spatial test"}</p></div>
-        <div className="wx-sig"><h4>INTERPRETATION</h4><p>{darkening ? "HH-darkening candidate" : brightening ? "HH-increase candidate" : "No clear HH change here"}</p></div>
-      </> : <p className="wx-note">No detector result at this location. That means <b>no candidate here</b> — not that the surface is unchanged.</p>}
-      <p className="wx-limit"><b>LIMITATION</b> Radar change does not by itself prove flooding. {r.resolution === "REGION" ? "Values are region averages, not a single pixel." : "Values come from a single raster cell."}</p>
-    </div>
+        {(["HH", "HV"] as const).map((c) => { const b = c === "HH" ? r.hh_before : r.hv_before; const a = c === "HH" ? r.hh_after : r.hv_after; const d = c === "HH" ? r.delta_hh : r.delta_hv;
+          return <table key={c} className="wx-sig"><caption>NISAR {c}</caption><tbody>
+            <tr><th scope="row">Before <KindTag kind="observed" /></th><td className="wx-mono">{v(b)} dB</td></tr>
+            <tr><th scope="row">After <KindTag kind="observed" /></th><td className="wx-mono">{v(a)} dB</td></tr>
+            <tr className="is-delta"><th scope="row">Change <KindTag kind="derived" /></th><td className="wx-mono">{d != null && d > 0 ? "+" : ""}{v(d)} dB</td></tr></tbody></table>; })}
+        <dl className="wx-facts">
+          <div><dt>Previous-date overlap</dt><dd>{selectedPatch?.id === r.region_id && selectedPatch?.temporal_overlap_fraction != null ? `${Math.round(selectedPatch.temporal_overlap_fraction * 100)}% of this region was flagged before` : "Select the region to see its tests"}</dd></div>
+          <div><dt>Reading</dt><dd>{dark ? "HH-darkening candidate" : bright ? "HH-increase candidate" : "No clear HH change here"}</dd></div></dl>
+      </> : <p className="wx-note">No detector result at this location. That means no candidate here. It does not mean the surface is unchanged.</p>}
+    </ToolFrame>
   );
 }
 
-/* ── DETECTION SENSITIVITY: does the signal survive? ── */
+/* ── Does it survive? Stored sensitivity sweep ── */
 export function SensitivityDrawer() {
   const { sensitivityData: s, dataTier, threshold, setThreshold, demoMode } = useWetlandStore();
-  const [shown, setShown] = useState(threshold);
-  if (!s) return <p className="wx-hint">No sensitivity sweep is available.</p>;
-  const cur = demoMode ? threshold : shown;
-  const max = Math.max(...s.thresholds.map((t) => t.area_km2), 0.0001);
-  const row = s.thresholds.find((t) => Math.abs(t.delta_db - cur) < 0.01);
+  const [picked, setPicked] = useState<number | null>(null);
+  if (!s) return <ToolFrame title="Does it survive?" lede="Would the flagged area change if the detection cutoff were stricter or looser?" limitation="No sensitivity sweep is stored for this case."><p className="wx-empty">Not available.</p></ToolFrame>;
+  const base = (s as unknown as { base_threshold_db?: number }).base_threshold_db ?? threshold;
+  const rows = s.thresholds; const max = Math.max(...rows.map((t) => t.area_km2), 0.0001);
+  const baseRow = rows.find((t) => Math.abs(t.delta_db - base) < 0.01);
+  const lo = rows.reduce((a, b) => (b.area_km2 < a.area_km2 ? b : a)); const hi = rows.reduce((a, b) => (b.area_km2 > a.area_km2 ? b : a));
+  const cur = demoMode ? threshold : picked ?? base; const curRow = rows.find((t) => Math.abs(t.delta_db - cur) < 0.01);
+  const stable = s.stability_verdict === "STABLE";
+  const source = demoMode ? "Simulated interaction. Moving the slider re-runs the demonstration rule and the map updates."
+    : `Stored sweep from ${dataTier === "SHOWCASE" ? "the processed case" : "the saved run"}. Selecting a row only highlights it. The detector is not re-run and the map keeps showing the stored result at ${base.toFixed(1)} dB.`;
   return (
-    <div className="wx-sens">
-      <p className="wx-eyebrow">DOES THE SIGNAL SURVIVE?</p>
-      <h2>Does the story survive a stricter threshold?</h2>
-      <p className={`wx-note ${demoMode ? "wx-note--sim" : ""}`}>{demoMode ? "SIMULATED INTERACTION — moving the slider re-runs the demonstration rule and the map updates."
-        : dataTier === "SHOWCASE" ? "STORED SENSITIVITY SWEEP — computed when this case was processed. The slider highlights a stored row; the map keeps showing the stored result and is not recomputed here."
-          : "STORED SENSITIVITY SWEEP — read from the saved run. The slider highlights a stored row; the map is not recomputed."}</p>
-      <label className="wx-slider">Threshold <b>{cur.toFixed(1)} dB</b>
-        <input type="range" min={0.5} max={5} step={0.5} value={cur} onChange={(e) => demoMode ? setThreshold(Number(e.target.value)) : setShown(Number(e.target.value))} aria-label="Detection threshold in dB" /></label>
-      <ul className="wx-bars">{s.thresholds.map((t) => (
-        <li key={t.delta_db} className={Math.abs(t.delta_db - cur) < 0.01 ? "is-current" : ""}>
-          <span>{t.delta_db.toFixed(1)} dB</span><div><i style={{ width: `${(t.area_km2 / max) * 100}%` }} /></div><em>{t.area_km2.toFixed(1)} km² · {t.patches}</em></li>))}</ul>
-      {row && <p className="wx-readout">At {row.delta_db.toFixed(1)} dB: <b>{row.area_km2.toFixed(2)} km²</b> across <b>{row.patches}</b> regions.</p>}
-      <p className={`wx-verdict wx-verdict--${s.stability_verdict.toLowerCase()}`}><b>{s.stability_verdict === "STABLE" ? "STABLE" : "SENSITIVE"}</b> {s.sensitivity_note}</p>
-    </div>
+    <ToolFrame title="Does it survive?" lede="Would the flagged area change if the detection cutoff were stricter or looser? These are the cutoffs that were actually tested."
+      limitation="A rule that is stable across cutoffs is not necessarily accurate. Stability says nothing about whether the flagged area is water."
+      action={demoMode ? <label className="wx-slider">Cutoff <b className="wx-mono">{cur.toFixed(1)} dB</b><input type="range" min={0.5} max={5} step={0.5} value={cur} onChange={(e) => setThreshold(Number(e.target.value))} aria-label="Detection cutoff in dB" /></label> : undefined}>
+      <p className={`wx-note ${demoMode ? "wx-note--sim" : ""}`}>{source}</p>
+      <div className={`wx-verdict wx-verdict--${stable ? "stable" : "sensitive"}`}>
+        <span className="wx-micro">Stored verdict</span><strong>{stable ? "Stable" : "Sensitive to the cutoff"}</strong>
+        <p>Flagged area ranges from <b>{lo.area_km2.toFixed(1)} km²</b> at {lo.delta_db.toFixed(1)} dB to <b>{hi.area_km2.toFixed(1)} km²</b> at {hi.delta_db.toFixed(1)} dB{s.stable_range?.length ? `. It stays within the pipeline stable band only between ${s.stable_range[0].toFixed(1)} and ${s.stable_range[s.stable_range.length - 1].toFixed(1)} dB` : ""}.</p>
+      </div>
+      <ul className="wx-bars" aria-label="Flagged area at each tested cutoff">
+        {rows.map((t) => { const isBase = Math.abs(t.delta_db - base) < 0.01; const sel = Math.abs(t.delta_db - cur) < 0.01;
+          return <li key={t.delta_db} className={`${sel ? "is-current" : ""}${isBase ? " is-base" : ""}`}>
+            <button type="button" onClick={() => !demoMode && setPicked(t.delta_db)} aria-pressed={sel} aria-label={`${t.delta_db.toFixed(1)} dB: ${t.area_km2.toFixed(1)} square kilometres in ${t.patches} regions${isBase ? ", the cutoff used for the map" : ""}`}>
+              <span className="wx-mono">{t.delta_db.toFixed(1)} dB{isBase ? " ●" : ""}</span><div><i style={{ width: `${(t.area_km2 / max) * 100}%` }} /></div><em className="wx-mono">{t.area_km2.toFixed(1)} km² · {t.patches}</em></button></li>; })}
+      </ul>
+      <p className="wx-caption">● is the cutoff used for the map ({base.toFixed(1)} dB){baseRow ? `: ${baseRow.area_km2.toFixed(2)} km² in ${baseRow.patches} regions` : ""}. Numbers on the right are area and region count.</p>
+      {curRow && baseRow && curRow !== baseRow && <p className="wx-readout">At {curRow.delta_db.toFixed(1)} dB the area is {Math.abs((curRow.area_km2 / baseRow.area_km2 - 1) * 100).toFixed(0)}% {curRow.area_km2 > baseRow.area_km2 ? "larger" : "smaller"} than at the cutoff used for the map.</p>}
+    </ToolFrame>
   );
 }
 
-/* ── CHANGE STORY ── */
+/* ── What happened? ── */
 export function StoryDrawer() {
   const { pulseData, dataTier, showcase } = useWetlandStore();
   if (!pulseData) return null;
   const paras = changeStory(pulseData, dataTier, opticalState(dataTier, pulseData), showcase?.reference);
-  return <div className="wx-story"><p className="wx-eyebrow">WHAT HAPPENED?</p>{paras.map((t, i) => <p key={i}>{t}</p>)}<p className="wx-note">Generated from the loaded values only. It names no causes.</p></div>;
+  return (
+    <ToolFrame title="What happened?" lede="A plain-language summary written only from the measurements loaded in this case." limitation="This text names no causes and is not a flood report.">
+      <div className="wx-prose">{paras.map((t, i) => <p key={i}>{t}</p>)}</div>
+    </ToolFrame>
+  );
 }
 
-/* ── NASA DATA CHAIN ── */
-const CHAIN = [
-  ["NASA NISAR", "L-band radar observes the same ground repeatedly, day or night, through cloud."],
-  ["GCOV", "Level-2 geocoded covariance: calibrated backscatter on a map grid."],
-  ["HH + HV", "Two polarizations. HH reacts strongly to smooth water; HV to vegetation structure."],
-  ["Temporal baseline", "An earlier observation (or per-pixel median of earlier ones) is the 'before'."],
-  ["Radar change", "After minus before, in dB, only where data are valid."],
-  ["Candidate regions", "Contiguous changed pixels become polygons with area and statistics."],
-  ["Evidence tests", "Quality, local consistency, multi-date persistence, threshold stability."],
-  ["Contextual comparison", "Optical (HLS) agreement on shared clear pixels — context, not truth."],
-  ["Human interpretation", "You decide what the evidence supports."],
+/* ── Data chain ── */
+type ChainCtx = { product?: string; frequency?: string; dates: string[]; mask?: string | null; baseline?: string; threshold?: number; optical: string };
+const CHAIN: { kind: Kind; title: string; plain: string; tech: (c: ChainCtx) => string }[] = [
+  { kind: "observed", title: "NASA NISAR source", plain: "An L-band radar satellite images the same ground repeatedly, through cloud and at night.", tech: (c) => `Product ${c.product ?? "NISAR L2 GCOV"} · ${c.frequency ?? "L-band"}` },
+  { kind: "observed", title: "Acquisition metadata", plain: "Each scene has an acquisition date and a footprint. These dates are the timeline's dots.", tech: (c) => c.dates.length ? `${c.dates.length} processed acquisitions: ${c.dates.map((d) => d.slice(5)).join(", ")}` : "Dates recorded per run" },
+  { kind: "observed", title: "Quality filtering", plain: "Pixels with missing or invalid data in any channel are left out before anything is compared.", tech: (c) => c.mask ?? "Finite positive HH and HV power; GCOV number-of-looks above zero" },
+  { kind: "derived", title: "Derived signal", plain: "The after scene minus a baseline, in dB, for HH and HV.", tech: (c) => c.baseline ?? "Per-pixel median of earlier observations" },
+  { kind: "candidate", title: "Candidate regions", plain: "Connected pixels that pass the change rules become regions with an area and statistics.", tech: (c) => c.threshold != null ? `Base cutoff ${c.threshold.toFixed(1)} dB · minimum region size applies` : "Rule-based; cutoff recorded with the run" },
+  { kind: "context", title: "Independent evidence", plain: "Optical satellite data (HLS) are compared only where both dates are clear. This is context, not ground truth.", tech: (c) => c.optical },
 ];
 export function ChainDrawer() {
   const [open, setOpen] = useState<number | null>(null);
-  return <div className="wx-chain"><p className="wx-eyebrow">NASA DATA CHAIN</p><h2>We are not drawing polygons. We are turning observations into evidence.</h2>
-    <ol>{CHAIN.map(([t, d], i) => <li key={t}><button onClick={() => setOpen(open === i ? null : i)} aria-expanded={open === i}><span>{i + 1}</span>{t}</button>{open === i && <p>{d}</p>}</li>)}</ol></div>;
+  const { showcase, pulseData, dataTier, sensitivityData, selectedPatch } = useWetlandStore();
+  const m = showcase?.manifest;
+  const ctx: ChainCtx = { product: m?.product, frequency: m?.frequency, dates: pulseData?.dates.map((d) => d.date) ?? [], mask: m?.quality_mask_method,
+    baseline: selectedPatch?.baseline_observation_dates ? `Per-pixel median of ${selectedPatch.baseline_observation_dates.length} earlier observations (${selectedPatch.baseline_observation_dates.join(", ")})` : m?.baseline_method ? m.baseline_method.replaceAll("_", " ").toLowerCase() : undefined,
+    threshold: (sensitivityData as unknown as { base_threshold_db?: number } | null)?.base_threshold_db, optical: opticalLabel(opticalState(dataTier, pulseData), showcase?.reference) };
+  return (
+    <ToolFrame title="Data chain" lede="From NASA's radar to a candidate region, in six steps. Open a step for its technical detail."
+      limitation="Every step is automated except the last decision: what the evidence supports is up to the person reading it.">
+      <ol className="wx-chain">
+        {CHAIN.map((c, i) => (
+          <li key={c.title}><button onClick={() => setOpen(open === i ? null : i)} aria-expanded={open === i}><span className="wx-chain__n wx-mono">{i + 1}</span><span><KindTag kind={c.kind} /> <strong>{c.title}</strong><small>{c.plain}</small></span></button>
+            {open === i && <p className="wx-mono wx-chain__tech">{c.tech(ctx)}</p>}</li>))}
+      </ol>
+    </ToolFrame>
+  );
 }
 
-/* ── WHY RADAR? ── */
+/* ── Why radar? ── */
 export function WhyRadarDrawer() {
   const [clouds, setClouds] = useState(true);
-  return <div className="wx-why"><p className="wx-eyebrow">WHY RADAR?</p><h2>Some places are hard to see.</h2>
-    <label className="wx-toggle"><input type="checkbox" checked={clouds} onChange={(e) => setClouds(e.target.checked)} /> Cloud cover during the monsoon</label>
-    <div className="wx-why-grid">
-      <div data-blocked={clouds}><b>Optical</b><span>{clouds ? "Cloud blocks the view — no usable image." : "Clear sky — usable image."}</span></div>
-      <div><b>NISAR L-band radar</b><span>Microwaves pass through cloud — still observable.</span></div>
-      <div><b>Vegetation</b><span>Long L-band waves can interact with water beneath and around canopy, which optical cannot see.</span></div>
-    </div><p className="wx-note">A radar signal change can have several causes. That is why this app asks you to challenge every detection.</p></div>;
+  return (
+    <ToolFrame title="Why radar?" lede="Radar can observe places that cloud and vegetation hide from optical satellites, which matters in a monsoon wetland."
+      limitation="A change in radar signal can have several causes. That is why every candidate here can be challenged.">
+      <label className="wx-toggle"><input type="checkbox" checked={clouds} onChange={(e) => setClouds(e.target.checked)} /> Cloud cover during the monsoon</label>
+      <dl className="wx-why">
+        <div data-blocked={clouds}><dt>Optical imagery</dt><dd>{clouds ? "Cloud blocks the view. No usable image." : "Clear sky. A usable image."}</dd></div>
+        <div><dt>NISAR L-band radar</dt><dd>Microwaves pass through cloud, so the surface is still observed.</dd></div>
+        <div><dt>Vegetation</dt><dd>Long L-band waves can interact with water among and beneath plants, which optical sensors cannot see.</dd></div>
+      </dl>
+    </ToolFrame>
+  );
 }
 
-/* ── LOCK COMPARISON ── */
+/* ── Lock comparison ── */
 export function CompareDrawer() {
-  const { pulseData, lock, lockComparison, clearLock, selectedDateIndex, radarOpacity, setRadarOpacity } = useWetlandStore();
+  const { pulseData, lock, lockComparison, clearLock, selectedDateIndex, radarOpacity, setRadarOpacity, showcase, dataTier } = useWetlandStore();
   const dates = useMemo(() => pulseData?.dates ?? [], [pulseData]);
+  const usable = useMemo(() => (dataTier === "SHOWCASE" && showcase ? new Set(showcase.observations.filter((o) => o.patches_file).map((o) => o.date)) : null), [dataTier, showcase]);
   const [b, setB] = useState(0); const [a, setA] = useState(Math.max(0, selectedDateIndex));
-  if (dates.length < 2) return <p className="wx-hint">At least two observation dates are needed.</p>;
-  return <div className="wx-compare"><p className="wx-eyebrow">COMPARISON WORKSPACE</p><h2>Lock two dates.</h2>
-    <label>BEFORE<select value={b} onChange={(e) => setB(Number(e.target.value))}>{dates.map((d, i) => <option key={d.date} value={i}>{fmtDate(d.date)}</option>)}</select></label>
-    <label>AFTER<select value={a} onChange={(e) => setA(Number(e.target.value))}>{dates.map((d, i) => <option key={d.date} value={i}>{fmtDate(d.date)}</option>)}</select></label>
-    {lock ? <button className="wx-btn" onClick={clearLock}>UNLOCK</button> : <button className="wx-btn wx-btn--primary" disabled={a === b} onClick={() => void lockComparison(b, a)}>LOCK</button>}
-    {lock && <p className="wx-note">Locked: {fmtDate(dates[lock.beforeIndex].date)} ⟷ {fmtDate(dates[lock.afterIndex].date)}. Drag or use arrow keys on the divider. Candidate regions are the stored detections for each date.</p>}
-    <label>Radar layer opacity <b>{Math.round(radarOpacity * 100)}%</b><input type="range" min={0.2} max={1} step={0.05} value={radarOpacity} onChange={(e) => setRadarOpacity(Number(e.target.value))} /></label>
-    <p className="wx-note">Locking pauses playback. Both sides show real stored detections for the chosen dates; nothing is interpolated.</p></div>;
+  if (dates.length < 2) return <ToolFrame title="Lock comparison" lede="Lock two observations to compare them on the same map." limitation="At least two dates are needed."><p className="wx-empty">Not available.</p></ToolFrame>;
+  const opt = (d: { date: string }, i: number) => <option key={d.date} value={i} disabled={!!usable && !usable.has(d.date)}>{fmtDate(d.date, { month: "short", day: "numeric", year: "numeric" })}</option>;
+  return (
+    <ToolFrame title="Lock comparison" lede="Pick two real observations. The map splits so you can drag between them on the same geographic extent."
+      limitation="Both sides show the stored candidate regions for those dates. Nothing is interpolated between acquisitions."
+      action={lock ? <button className="wx-btn" onClick={clearLock}>Reset comparison</button> : <button className="wx-btn wx-btn--primary" disabled={a === b} onClick={() => void lockComparison(b, a)}>Lock these two dates</button>}>
+      <div className="wx-form">
+        <label>Before<select value={b} onChange={(e) => setB(Number(e.target.value))}>{dates.map(opt)}</select></label>
+        <label>After<select value={a} onChange={(e) => setA(Number(e.target.value))}>{dates.map(opt)}</select></label>
+      </div>
+      {lock && <p className="wx-note">Locked: <b>{fmtDate(dates[lock.beforeIndex].date)}</b> (left) and <b>{fmtDate(dates[lock.afterIndex].date)}</b> (right), both showing candidate regions. Drag the divider or use the arrow keys on it.</p>}
+      <label className="wx-slider">Radar layer opacity <b className="wx-mono">{Math.round(radarOpacity * 100)}%</b><input type="range" min={0.2} max={1} step={0.05} value={radarOpacity} onChange={(e) => setRadarOpacity(Number(e.target.value))} /></label>
+      <p className="wx-caption">Opacity applies to radar layers in the Radar view.</p>
+    </ToolFrame>
+  );
 }
 
-export function AboutDrawer() {
-  const { dataTier, showcase, pulseData, switchToSandbox, loadShowcase } = useWetlandStore();
-  return <div className="wx-about"><p className="wx-eyebrow">PROVENANCE</p><TierBadge tier={dataTier} />
-    {dataTier === "SHOWCASE" && showcase && <ul><li>Source: {showcase.manifest.source}</li><li>Product: {showcase.manifest.product} ({showcase.manifest.product_maturity ?? "provisional"})</li><li>Baseline: {showcase.manifest.baseline_date}{showcase.manifest.baseline_method === "PER_PIXEL_MEDIAN" && showcase.manifest.baseline_observation_dates ? ` (per-pixel median of ${showcase.manifest.baseline_observation_dates.length} earlier observations)` : ""}</li><li>Exported: {fmtDate(showcase.manifest.exported_at.slice(0, 10), { month: "short", day: "numeric", year: "numeric" })}</li>{showcase.manifest.limitations.map((l) => <li key={l}>{l}</li>)}</ul>}
-    {dataTier === "SHOWCASE" && showcase?.manifest.legacy && <div className="wx-legacy">
-      <p className="wx-note"><b>Legacy NISAR run — {showcase.manifest.completeness === "METADATA_ONLY" ? "acquisition dates and boundary only" : "partial export"}.</b> {showcase.manifest.legacy.note}</p>
-      <p className="wx-eyebrow">NOT IN THIS EXPORT</p>
-      <ul>{showcase.manifest.legacy.skipped.map((x) => <li key={x.artifact}><b>{x.artifact}</b> — {x.reason}</li>)}</ul></div>}
-    {dataTier === "SANDBOX" && <p className="wx-note wx-note--sim">All dates, signals and geometry are a fictional, deterministic simulation for demonstrating interactions. No satellite data are used.</p>}
-    {dataTier === "LOCAL_RUN" && <p className="wx-note">Saved pipeline run {pulseData?.site}. Provisional NISAR product; not validated.</p>}
-    <div className="wx-row"><button className="wx-btn" onClick={() => void loadShowcase()}>Open featured case</button><button className="wx-btn" onClick={switchToSandbox}>Open sandbox</button></div></div>;
-}
-
-/* ── DOES AN INDEPENDENT SENSOR AGREE? ── */
-const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+/* ── Independent check ── */
+const IMG_LABEL: Record<string, string> = {
+  reference_before_rgb: "Optical, before", reference_before_water: "Optical water, before", reference_after_rgb: "Optical, after", reference_after_water: "Optical water, after",
+  reference_agreement: "Radar vs optical", reference_coverage: "Shared clear area", reference_candidate_overlay: "Radar candidates on optical",
+};
 export function OpticalDrawer() {
   const { dataTier, showcase, pipelineRunId, pulseData } = useWetlandStore();
   const [local, setLocal] = useState<{ id: string; ref: ShowcaseReference | null } | null>(null);
@@ -208,30 +243,65 @@ export function OpticalDrawer() {
   }, [dataTier, pipelineRunId]);
   const state = opticalState(dataTier, pulseData);
   const ref = dataTier === "SHOWCASE" ? showcase?.reference : local?.id === pipelineRunId ? local.ref : null;
-  const ev = ref?.evidence; const m = ev?.metrics;
+  const ev = ref?.evidence; const m = ev?.metrics; const cov = ev?.coverage as { common_clear_fraction?: number; common_clear_area_km2?: number; minimum_clear_fraction_for_check?: number } | undefined;
+  const reason = (ref?.validation as { reason?: string } | undefined)?.reason;
+  const need = cov?.minimum_clear_fraction_for_check ?? 0.2; const have = cov?.common_clear_fraction ?? 0;
+  const inconclusive = state === "INCONCLUSIVE" || (ev?.reference_status ?? "") === "INCONCLUSIVE";
+  const cmp = ev?.comparison as { baseline?: { hls_date?: string; nisar_date?: string }; event?: { hls_date?: string; nisar_date?: string } } | undefined;
   return (
-    <div className="wx-optical">
-      <p className="wx-eyebrow">DOES AN INDEPENDENT SENSOR AGREE?</p>
-      <h2>{opticalLabel(state, showcase?.reference)}</h2>
+    <ToolFrame title="Independent check" lede="Does a different kind of satellite agree? Optical imagery (HLS) is compared with the radar candidates, but only where both optical dates were clear."
+      limitation="Optical agreement is context, not field truth. It cannot validate flooded vegetation, and low overlap can mean water was already present on both optical dates.">
       {state === "SIMULATED" && <p className="wx-note wx-note--sim">The sandbox has no optical data. Nothing here supports or contradicts the simulated candidates.</p>}
-      {state !== "SIMULATED" && !ev && <p className="wx-note">{dataTier === "LOCAL_RUN" && !local ? "Loading saved comparison…" : "No optical comparison was saved with this run. Absence of a check is not disagreement."}</p>}
+      {state !== "SIMULATED" && !ev && <p className="wx-empty">{dataTier === "LOCAL_RUN" && !local ? "Loading the saved comparison…" : "No optical comparison was saved with this run. A missing check is not disagreement."}</p>}
       {ev && <>
-        <dl className="wx-status">
-          <div><dt>Common clear area</dt><dd>{pct(ev.coverage?.common_clear_fraction)}</dd></div>
-          {ev.comparison?.baseline?.hls_date && <div><dt>HLS dates</dt><dd>{ev.comparison.baseline.hls_date} → {ev.comparison.event?.hls_date}</dd></div>}
-          {m && <><div><dt>Agree (radar + optical)</dt><dd>{m.matching_pixels.toLocaleString()} cells</dd></div>
-            <div><dt>Radar only</dt><dd>{m.radar_only_pixels.toLocaleString()} cells</dd></div>
-            <div><dt>Optical only</dt><dd>{m.optical_only_pixels.toLocaleString()} cells</dd></div>
-            <div><dt>Precision · recall · F1</dt><dd>{pct(m.precision)} · {pct(m.recall)} · {pct(m.f1)}</dd></div></>}
-        </dl>
+        <div className={`wx-callout ${inconclusive ? "wx-callout--warn" : ""}`}>
+          <span className="wx-micro">Result</span>
+          <strong>{inconclusive ? "Inconclusive: not enough shared clear sky to judge" : "Comparison completed"}</strong>
+          {inconclusive && <p>This is not a failed detection and not a zero score. The optical images simply cannot assess almost all of the study area{reason ? `: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}` : "."}</p>}
+        </div>
+        <div className="wx-cover" role="img" aria-label={`Shared clear area ${pct1(have)} of the study area; at least ${pct1(need)} is needed`}>
+          <div className="wx-cover__bar"><i style={{ width: `${Math.max(0.6, Math.min(100, have * 100))}%` }} /><b style={{ left: `${Math.min(100, need * 100)}%` }} /></div>
+          <div className="wx-cover__legend"><span><KindTag kind="context">Assessed</KindTag> <span className="wx-mono">{pct1(have)}{cov?.common_clear_area_km2 != null ? ` · ${cov.common_clear_area_km2.toFixed(2)} km²` : ""}</span></span><span><KindTag kind="unassessed" /> <span className="wx-mono">{pct1(1 - have)}</span></span><span className="wx-mono">needed ≥ {pct1(need)}</span></div>
+        </div>
+        {cmp?.baseline?.hls_date && <dl className="wx-facts"><div><dt>Optical dates</dt><dd className="wx-mono">{cmp.baseline.hls_date} → {cmp.event?.hls_date}</dd></div><div><dt>Radar dates</dt><dd className="wx-mono">{cmp.baseline.nisar_date} → {cmp.event?.nisar_date}</dd></div></dl>}
+        {m && (inconclusive
+          ? <details className="wx-raw"><summary>Raw comparison numbers (not meaningful at this coverage)</summary>
+              <p className="wx-mono">agree {m.matching_pixels.toLocaleString()} · radar only {m.radar_only_pixels.toLocaleString()} · optical only {m.optical_only_pixels.toLocaleString()}<br />precision {pct1(m.precision)} · recall {pct1(m.recall)} · F1 {pct1(m.f1)}</p>
+              <p className="wx-caption">With so few comparable pixels these scores describe the sampling gap, not detector accuracy.</p></details>
+          : <dl className="wx-facts"><div><dt>Satellite agreement</dt><dd className="wx-mono">precision {pct1(m.precision)} · recall {pct1(m.recall)} · F1 {pct1(m.f1)}</dd></div></dl>)}
         {ev.showcase_images && Object.keys(ev.showcase_images).length > 0 && <div className="wx-optical-imgs">
-          {Object.entries(ev.showcase_images).slice(0, 4).map(([name, path]) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <figure key={name}><img loading="lazy" src={showcaseUrl(path)} alt={`Optical evidence ${name.replace(/_/g, " ")}`} /><figcaption>{name.replace(/^reference_|\.png$/g, "").replace(/_/g, " ")}</figcaption></figure>))}
+          {Object.entries(ev.showcase_images).map(([name, path]) => { const key = name.replace(/\.png$/, "");
+            return (// eslint-disable-next-line @next/next/no-img-element
+              <figure key={name}><img loading="lazy" src={showcaseUrl(path)} alt={IMG_LABEL[key] ?? key.replaceAll("_", " ")} /><figcaption>{IMG_LABEL[key] ?? key}</figcaption></figure>); })}
         </div>}
-        <p className="wx-limit"><b>LIMITATION</b> This is a cross-sensor agreement check on shared clear pixels. It is not field truth and does not validate flooded vegetation. Low agreement can mean water was already present on both optical dates.</p>
-        {ev.limitations?.map((l) => <p key={l} className="wx-note">{l}</p>)}
+        {ev.limitations && ev.limitations.length > 0 && <details className="wx-raw"><summary>Recorded limitations</summary><ul className="wx-plain">{ev.limitations.map((l) => <li key={l}>{l}</li>)}</ul></details>}
       </>}
-    </div>
+    </ToolFrame>
+  );
+}
+
+/* ── Provenance ── */
+export function AboutDrawer() {
+  const { dataTier, showcase, pulseData, switchToSandbox, loadShowcase } = useWetlandStore();
+  const m = showcase?.manifest;
+  return (
+    <ToolFrame title="Provenance" lede="Where this data came from, what is measured, what is calculated, and what is missing."
+      limitation={dataTier === "SANDBOX" ? "Every date, signal and shape in the sandbox is invented to demonstrate the interface." : "The NISAR input is a provisional product, there is no field truth, and the boundary is a mapped polygon, not a legal wetland extent."}
+      action={<div className="wx-row"><button className="wx-btn" onClick={() => void loadShowcase()}>Open the real showcase</button><button className="wx-btn" onClick={switchToSandbox}>Open the sandbox</button></div>}>
+      <TierBadge tier={dataTier} completeness={m?.completeness} />
+      {dataTier === "SHOWCASE" && m && <>
+        <Section eyebrow="Observed" title="NISAR acquisitions"><p>{m.product} ({m.product_maturity ?? "provisional"}) over {m.site_display_name ?? m.site_name.replace(/ mapped boundary$/i, "")}. {m.observation_dates.length} processed dates, {fmtDate(m.observation_dates[0])} to {fmtDate(m.observation_dates[m.observation_dates.length - 1], { month: "short", day: "numeric", year: "numeric" })}.</p></Section>
+        <Section eyebrow="Derived" title="Calculated by the pipeline"><p>Change against {m.baseline_method === "PER_PIXEL_MEDIAN" && m.baseline_observation_dates ? `a per-pixel median of ${m.baseline_observation_dates.length} earlier observations` : `the baseline of ${m.baseline_date}`}. Candidate regions follow rule-based cutoffs.</p></Section>
+        <Section eyebrow="Context" title="Boundary and independent data"><p>{m.wetland_boundary_source ?? "Boundary source not recorded"}.</p></Section>
+        <details className="wx-raw"><summary>Technical details</summary><dl className="wx-facts wx-mono">
+          <div><dt>Run</dt><dd>{m.run_id}</dd></div><div><dt>Frequency</dt><dd>{m.frequency ?? "n/a"}</dd></div><div><dt>Quality mask</dt><dd>{m.quality_mask_method ?? "n/a"}</dd></div>
+          <div><dt>Source</dt><dd>{m.source}</dd></div><div><dt>Exported</dt><dd>{m.exported_at.slice(0, 10)}</dd></div></dl></details>
+        {m.limitations.length > 0 && <details className="wx-raw"><summary>Limitations recorded with this export</summary><ul className="wx-plain">{m.limitations.map((l) => <li key={l}>{l}</li>)}</ul></details>}
+        {m.legacy && <div className="wx-legacy"><p className="wx-note"><b>Legacy run: {m.completeness === "METADATA_ONLY" ? "acquisition dates and boundary only" : "partial export"}.</b> {m.legacy.note}</p>
+          <p className="wx-micro">Not in this export</p><ul className="wx-plain">{m.legacy.skipped.map((x) => <li key={x.artifact}><b>{x.artifact}</b>: {x.reason}</li>)}</ul></div>}
+      </>}
+      {dataTier === "LOCAL_RUN" && <p className="wx-note">A saved pipeline run read from this machine ({pulseData?.site}). Provisional NISAR product; not validated.</p>}
+      {dataTier === "SANDBOX" && <p className="wx-note wx-note--sim">Simulated scenario. Nothing here was observed by a satellite.</p>}
+    </ToolFrame>
   );
 }

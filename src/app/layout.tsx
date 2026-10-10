@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "@/styles/atlas.css";
 
 export const metadata: Metadata = {
-  title: "Beyonders — Wetland Pulse | NASA Space Apps 2026",
+  title: "Beyonders — Earth Change Atlas | NASA Space Apps 2026",
   description:
-    "Track wetland inundation dynamics using real NISAR satellite radar observations. Detect flooded vegetation, monitor wetland pulse, and validate every signal with forensic evidence.",
+    "Explore real NISAR radar observations of a changing wetland, investigate why regions were flagged as radar-change candidates, and challenge every result.",
   keywords: [
     "NISAR",
     "wetland",
